@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor by
+      # default; the namespace tests need them.
+      - name: Allow unprivileged user namespaces
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: shellcheck
+        run: uvx --from shellcheck-py shellcheck bin/codex-sandbox hooks/codex-review-gate.sh shell/claude-profiles.sh
+
+      - name: ruff
+        run: |
+          uvx ruff check .
+          uvx ruff format --check .
+
+      - name: pytest
+        run: uvx pytest -v
