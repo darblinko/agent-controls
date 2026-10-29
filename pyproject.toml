@@ -1,0 +1,18 @@
+[project]
+name = "agent-controls"
+version = "0.1.0"
+description = "Controls for running coding agents: a bubblewrap sandbox for the Codex CLI, a Codex review gate for Claude Code, and per-profile Claude Code configuration."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "Mitchell Foutz" }]
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
