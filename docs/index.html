@@ -23,7 +23,7 @@
       <p class="lede">Three shell controls for developers who run Claude Code and the Codex CLI on a Linux or WSL2 workstation: a read boundary for Codex, a second review before Claude stops, and separate Claude Code profiles per account.</p>
       <dl class="record">
         <div><dt>Repository</dt><dd>darblinko/agent-controls</dd></div>
-        <div><dt>Revision</dt><dd><code>b42826c</code></dd></div>
+        <div><dt>Revision</dt><dd><code>b8fc30e</code></dd></div>
         <div><dt>Measured</dt><dd>2026-10-28</dd></div>
         <div><dt>License</dt><dd>Apache-2.0</dd></div>
       </dl>
@@ -79,7 +79,7 @@ flowchart TD
 
     <section>
       <h2>Measured results</h2>
-      <p>The test suite drives the scripts directly. The sandbox tests check the bwrap arguments built from a config, and 5 of them start a stand-in Codex inside a real namespace. The gate tests run the hook against a throwaway git repository with Codex replaced by a stub. All 66 control tests pass at <code>b42826c</code>.</p>
+      <p>The test suite drives the scripts directly. The sandbox tests check the bwrap arguments built from a config, and 5 of them start a stand-in Codex inside a real namespace. The gate tests run the hook against a throwaway git repository with Codex replaced by a stub. All 67 control tests pass at <code>b8fc30e</code>.</p>
       <figure class="chart" data-chart="tests-per-control"></figure>
       <aside class="note">
         <p>Reproduce: <code>uvx pytest -v</code>. Counts: <code>uvx pytest --collect-only -q</code>. The namespace tests are skipped where bubblewrap cannot create a namespace. The link check in <code>tests/test_links.py</code> is not counted.</p>
@@ -120,7 +120,7 @@ export CODEX_SANDBOX_DRY_RUN=1
   </main>
 
   <footer>
-    agent-controls. Apache-2.0. Figures generated from <code>docs/data.json</code> at <code>b42826c</code>.
+    agent-controls. Apache-2.0. Figures generated from <code>docs/data.json</code> at <code>b8fc30e</code>.
   </footer>
 
   <script src="charts.js" defer></script>

@@ -5,14 +5,14 @@ Three controls for running coding agents on a Linux or WSL2 workstation: a bubbl
 <!-- chart: hero -->
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/hero-dark.svg">
-  <img alt="66 tests of the three controls, 5 of them inside a real bubblewrap namespace; the review gate defaults to 2 rounds per batch and a 204,800 byte prompt." src="docs/figures/hero-light.svg" width="760">
+  <img alt="67 tests of the three controls, 5 of them inside a real bubblewrap namespace; the review gate defaults to 2 rounds per batch and a 204,800 byte prompt." src="docs/figures/hero-light.svg" width="760">
 </picture>
 
 <details><summary>Data table</summary>
 
 | Measure | Value |
 |---|---|
-| Control tests | 66 |
+| Control tests | 67 |
 | Namespace runs | 5 |
 | Review rounds | 2 |
 | Prompt cap, bytes | 204,800 |
@@ -87,14 +87,14 @@ Round 1 is a full review. Later rounds verify only the fixes for the previous ro
 <!-- chart: tests-per-control -->
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/tests-per-control-dark.svg">
-  <img alt="The review gate has 27 tests, codex-sandbox has 21 argument checks and 5 namespace runs, and claude_profile has 13 tests." src="docs/figures/tests-per-control-light.svg" width="760">
+  <img alt="The review gate has 28 tests, codex-sandbox has 21 argument checks and 5 namespace runs, and claude_profile has 13 tests." src="docs/figures/tests-per-control-light.svg" width="760">
 </picture>
 
 <details><summary>Data table</summary>
 
 | Item | Value |
 |---|---|
-| review gate | 27 |
+| review gate | 28 |
 | sandbox arguments | 21 |
 | claude_profile | 13 |
 | sandbox namespace runs | 5 |
@@ -106,7 +106,7 @@ Source: `uvx pytest --collect-only -q`
 | Test file | What it checks |
 |---|---|
 | tests/test_codex_sandbox.py | 21 checks of the bwrap arguments built from a config (binds, masks, subtree roots, refusals, WSL routes, config errors), and 5 runs of a stand-in Codex inside a real namespace: files outside the root are absent, `.env` content is unreadable, `ro` roots refuse writes, `$HOME` and `/mnt` are empty, `/init` is absent |
-| tests/test_review_gate.py | 27 runs of the gate against a throwaway git repository with Codex replaced by a stub: approval, blocking, the round cap and override, batch reset, test failures, reviewer failures, locking, prompt cap, dispute logging |
+| tests/test_review_gate.py | 28 runs of the gate against a throwaway git repository with Codex replaced by a stub: approval, blocking, the round cap and override, batch reset, test failures, reviewer failures, locking and lock takeover by age, prompt cap, dispute logging |
 | tests/test_claude_profiles.py | 13 checks of config dir and token selection, and refusal of unsafe profile names |
 | tests/test_links.py | Every relative link and image in the Markdown and HTML files resolves |
 

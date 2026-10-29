@@ -79,6 +79,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 }
 
 code, pre { font-family: var(--mono); font-size: 0.86em; }
+:not(pre) > code { overflow-wrap: anywhere; }
 
 .site-bar {
   display: flex;
