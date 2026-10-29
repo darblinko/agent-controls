@@ -280,6 +280,22 @@ def test_lock_of_a_dead_process_is_cleared(project):
     assert not lock.exists()
 
 
+def test_live_lock_is_taken_over_by_age_only_after_the_hook_timeout(project):
+    settings = json.loads((REPO / "examples" / "claude-settings.json").read_text())
+    hook_timeout = settings["hooks"]["Stop"][0]["hooks"][0]["timeout"]
+    project.edit()
+    project.reports.mkdir(parents=True)
+    lock = project.reports / "codex_review_gate.lock"
+    lock.write_text(f"{os.getpid()}\n{int(time.time()) - (hook_timeout - 1)}\n")
+    assert project.run(APPROVED).returncode == 0
+    assert project.calls() == 0
+    lock.write_text(f"{os.getpid()}\n{int(time.time()) - 2 * hook_timeout}\n")
+    result = project.run(APPROVED)
+    assert result.returncode == 0, result.stderr
+    assert project.calls() == 1
+    assert not lock.exists()
+
+
 def test_prompt_is_capped(project):
     project.edit("notes.txt", "line of text\n" * 2000)
     project.run(APPROVED, REVIEW_GATE_MAX_PROMPT_BYTES="4000")

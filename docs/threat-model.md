@@ -88,7 +88,7 @@ A Claude Code Stop hook. When Claude tries to stop, the gate runs the project's 
 | T4: an inconsistent verdict | An `APPROVED` verdict that lists blocking issues is treated as `CHANGES_REQUESTED`. | test_approved_verdict_with_blockers_counts_as_changes_requested |
 | T5: a review loop that does not converge | `REVIEW_GATE_MAX_ROUNDS` (default 2 in `hooks/codex-review-gate.sh`) caps the rounds per set of changed files. Rounds after the first are fix-verification only. After the last round the gate lets Claude stop and logs the unresolved blockers as an override. | test_second_round_verifies_fixes_then_overrides_at_the_cap, test_round_cap_is_configurable |
 | T5: a broken reviewer holding Claude | A Codex failure, a missing review file or an unparseable review returns exit 1. Claude Code shows the error to the user and does not block. No approval is written, and no round is used. | test_reviewer_failures_neither_block_nor_approve, test_reviewer_failure_does_not_use_a_round |
-| Concurrent stops | A PID lock. A lock older than `REVIEW_GATE_LOCK_STALE_SECONDS` (default 900), or held by a dead process, is cleared. | test_live_lock_skips_the_review, test_lock_of_a_dead_process_is_cleared |
+| Concurrent stops | A PID lock. A lock older than `REVIEW_GATE_LOCK_STALE_SECONDS` (default 1500, above the 1200-second Stop hook timeout in `examples/claude-settings.json`), or held by a dead process, is cleared. | test_live_lock_skips_the_review, test_lock_of_a_dead_process_is_cleared, test_live_lock_is_taken_over_by_age_only_after_the_hook_timeout |
 
 Design rationale (inference, not measured): without a cap, a reviewer that raises a new blocker in each round can keep Claude working indefinitely. The cap trades that risk for the risk in the next list.
 

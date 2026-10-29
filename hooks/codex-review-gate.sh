@@ -20,7 +20,7 @@
 #   REVIEW_GATE_SKIP_TESTS=1        skip the test command
 #   REVIEW_GATE_MAX_ROUNDS          review rounds per batch, default 2
 #   REVIEW_GATE_MAX_PROMPT_BYTES    prompt size cap, default 204800
-#   REVIEW_GATE_LOCK_STALE_SECONDS  age after which a live lock is taken over, default 900
+#   REVIEW_GATE_LOCK_STALE_SECONDS  age after which a live lock is taken over, default 1500
 #   REVIEW_GATE_CODEX               Codex executable, default codex
 #   REVIEW_GATE_DIR                 directory holding codex_reviewer.md and
 #                                   codex_review_schema.json, relative to the
@@ -93,7 +93,7 @@ is_disabled() {
 }
 
 acquire_lock() {
-  local stale=${REVIEW_GATE_LOCK_STALE_SECONDS:-900} lock_pid lock_time elapsed
+  local stale=${REVIEW_GATE_LOCK_STALE_SECONDS:-1500} lock_pid lock_time elapsed
   if [[ -f $LOCK_FILE ]]; then
     lock_pid=$(sed -n 1p "$LOCK_FILE")
     lock_time=$(sed -n 2p "$LOCK_FILE")
