@@ -76,7 +76,7 @@ flowchart TD
   fix --> stop
 ```
 
-Round 1 is a full review. Later rounds verify only the fixes for the previous round's blockers. A round counts only when Codex returns a verdict, so a test failure or a Codex outage does not use one. A change to the set of changed files starts a new batch at round 1. The approval records a hash of HEAD, the status, the diff and the untracked file contents, so any later edit triggers a new review. Codex's prompt is assembled from `templates/codex_reviewer.md`, the diffs, the untracked files and the test output, capped at 204800 bytes (`REVIEW_GATE_MAX_PROMPT_BYTES` default in `hooks/codex-review-gate.sh`).
+Round 1 is a full review. Later rounds verify only the fixes for the previous round's blockers. A round counts only when Codex returns a verdict, so a test failure or a Codex outage does not use one. A change to the `git status --short` output starts a new batch at round 1. A new changed file does this, and so does `git add` with no content change, because each status line carries the file's two status letters. The approval records a hash of HEAD, the status, the diff and the untracked file contents, so any later edit triggers a new review. Codex's prompt is assembled from `templates/codex_reviewer.md`, the diffs, the untracked files and the test output, capped at 204800 bytes (`REVIEW_GATE_MAX_PROMPT_BYTES` default in `hooks/codex-review-gate.sh`).
 
 ### claude_profile
 
@@ -186,6 +186,8 @@ tests/                         pytest suite that drives the scripts
 - The calling shell's environment passes into the namespace, except `WSL_INTEROP`, `WSLENV` and `unsetenv` entries.
 - After the last review round, Claude may stop with blockers still open. They are logged, and a person has to read the log.
 - The gate reviews uncommitted changes only. Work committed before Claude stops is not reviewed.
+- A stop that finds the review lock held by a live process younger than `REVIEW_GATE_LOCK_STALE_SECONDS` (default 1500) exits 0 without tests or a review, and Claude stops. The skip is logged only in `.ai/reports/qa_activity.log`. The default is above the 1200-second Stop hook timeout in [examples/claude-settings.json](examples/claude-settings.json); a longer hook timeout needs a larger value.
+- Untested: deletion of the previous review when the batch changes, untracked files over 51,200 bytes (cut to their first 200 lines), the batch reset caused by staging, and the real Codex CLI. The gate tests replace Codex with a stub.
 - A reviewer failure exits 1, which Claude Code reports to the user without blocking. A gate that blocked on its own failures could hold Claude in a loop it cannot resolve.
 - The gate is disabled with a marker file, `.ai/reports/disabled`, because an environment variable exported from a Claude Code Bash tool call does not reach the hook process.
 - Profile tokens travel as an environment variable and are readable by the same user's processes. See [docs/threat-model.md](docs/threat-model.md).

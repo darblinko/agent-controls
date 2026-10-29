@@ -58,7 +58,7 @@ flowchart TD
     sys ~~~ root ~~~ extra ~~~ empty ~~~ masked
   end
       </pre>
-      <p><code>hooks/codex-review-gate.sh</code> is a Claude Code Stop hook. It runs the project's tests, then a Codex review of the uncommitted changes. Blocking findings return exit 2 and Claude continues. Rounds are capped per batch of changed files; after the last round the gate lets Claude stop and logs the open blockers.</p>
+      <p><code>hooks/codex-review-gate.sh</code> is a Claude Code Stop hook. It runs the project's tests, then a Codex review of the uncommitted changes. Blocking findings return exit 2 and Claude continues. Rounds are capped per batch, a hash of the <code>git status --short</code> output, so a new changed file or a <code>git add</code> starts a new batch at round 1. After the last round the gate lets Claude stop and logs the open blockers.</p>
       <pre class="mermaid">
 flowchart TD
   stop["Claude tries to stop"] --> changes{"uncommitted changes?"}
@@ -112,6 +112,7 @@ export CODEX_SANDBOX_DRY_RUN=1
         <li>The calling shell's environment passes into the namespace, except <code>WSL_INTEROP</code>, <code>WSLENV</code> and <code>unsetenv</code> entries.</li>
         <li>After the last review round, Claude may stop with blockers still open. They are logged in <code>.ai/reports/qa_decisions.jsonl</code>.</li>
         <li>The gate reviews uncommitted changes only.</li>
+        <li>A stop that finds the review lock held by another live run exits 0 without tests or a review.</li>
         <li>Profile tokens travel as an environment variable readable by the same user's processes.</li>
         <li>The CI workflow has not run yet; the counts above come from a local run on WSL2.</li>
       </ul>

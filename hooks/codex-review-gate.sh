@@ -6,7 +6,7 @@
 # previous round were fixed. When the last allowed round still requests
 # changes, the gate lets Claude stop and records the unresolved blockers as an
 # override in the decision log. A round is counted only when Codex returns a
-# verdict. A change to the set of changed files starts a new batch at round 1.
+# verdict. A change in `git status --short`, git add included, restarts at round 1.
 #
 # Exit 0: Claude may stop.
 # Exit 2: Claude must act on stderr (failed tests or requested changes).
