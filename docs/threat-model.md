@@ -45,10 +45,10 @@ The wrapper starts Codex in a bubblewrap mount namespace. A path that is not bou
 | T1: reads outside the working root | Only the configured root that contains the current directory is bound. Other roots and repositories are absent. Codex refuses to start outside every root. | test_files_outside_the_root_do_not_exist, test_refuses_a_directory_outside_every_root |
 | T1: reads of dotfiles in `$HOME` | `/tmp`, `/home` and `$HOME` are empty tmpfs mounts. Only `tool` and `state` paths from the config are bound back. | test_home_mnt_and_wsl_entry_points_are_empty_or_absent, test_home_and_tmp_start_empty |
 | T1: partial access to a governed repository | `ro <root> <subtree>...` binds only the listed subtrees. `.git` is absent, so the history of unlisted directories is unreachable. | test_subtree_root_binds_only_the_listed_subtrees, test_subtree_root_refuses_a_directory_outside_its_subtrees |
-| T2: `.env` files inside the root | Every regular file named `.env*`, or matching a `mask` pattern, is overmounted with `/dev/null`. Reads of it fail. | test_masked_env_file_content_is_not_readable, test_env_files_are_masked_and_dependency_dirs_pruned, test_mask_lines_add_patterns |
+| T2: `.env` files inside the root | Every regular file named `.env*`, or matching a `mask` pattern, is overmounted with `/dev/null`. Reads of it fail. The search prunes directories named `node_modules`, `.git`, `.venv`, `venv` and `__pycache__`; files inside them are not masked. | test_masked_env_file_content_is_not_readable, test_env_files_are_masked_and_dependency_dirs_pruned, test_mask_lines_add_patterns |
 | T2: credentials in environment variables | `unsetenv` lines remove named variables. | test_state_tool_and_environment_lines |
 | Writes to a reference repository | `ro` roots are read-only binds. | test_read_only_root_refuses_writes |
-| WSL: Windows drives, launching Windows executables, the interop socket | `/mnt` is an empty tmpfs. `/init` and `/run` are absent. `WSL_INTEROP` and `WSLENV` are unset. | test_wsl_routes_are_removed, test_home_mnt_and_wsl_entry_points_are_empty_or_absent |
+| WSL: Windows drives, the interop socket | `/mnt` is an empty tmpfs and `/run` is absent, except that the target of `/etc/resolv.conf`, when it resolves outside `/etc`, is bound read-only as one file and can lie under `/mnt` or `/run`. `/init` is absent. `WSL_INTEROP` and `WSLENV` are unset. The tests check that `/run` and `/init` are not bound, that `/init` is absent inside the namespace, and that the two variables are unset. | test_wsl_routes_are_removed, test_home_mnt_and_wsl_entry_points_are_empty_or_absent |
 
 The five tests that start a real namespace are skipped where bubblewrap cannot create one. CI enables unprivileged user namespaces so that they run there.
 
@@ -56,7 +56,8 @@ The five tests that start a real namespace are skipped where bubblewrap cannot c
 
 - **Network egress.** The network is shared, because the Codex API needs it. Anything inside the bound root can be sent anywhere the machine can reach.
 - **Environment variables.** The calling shell's environment passes through, except `WSL_INTEROP`, `WSLENV` and the `unsetenv` entries.
-- **Secrets under other names.** Masking matches regular file names when Codex starts. A secret in a file with another name, a file created after launch, or a symbolic link is not masked.
+- **Secrets under other names or in pruned directories.** Masking matches regular file names when Codex starts. A secret in a file with another name, a file created after launch, a symbolic link, or a `.env*` file under a directory named `node_modules`, `.git`, `.venv`, `venv` or `__pycache__` is not masked.
+- **Windows executables through binfmt_misc.** `/init` is absent. Whether that disables the WSLInterop binfmt_misc handler depends on the handler's registration flags: with the `F` flag, the kernel opens the interpreter when the handler is registered (Linux kernel binfmt_misc documentation). The flags were not checked, and no test runs a Windows executable inside the namespace.
 - **Everything that is bound.** The working root, every `tool` path and every `state` path are visible. `~/.codex`, which holds Codex's own credentials, is usually a read-write `state` path. `/etc` is bound read-only in full.
 - **Bypass.** `CODEX_UNCONFINED=1`, or running the real Codex binary by its absolute path, skips the namespace.
 - **Other agents.** Claude Code is not confined by this wrapper. It has its own permission system.

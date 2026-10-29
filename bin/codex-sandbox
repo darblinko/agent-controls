@@ -18,10 +18,15 @@
 #   only those subtrees, so .git is absent and `exec` gets
 #   --skip-git-repo-check.
 #   Every regular file under a bound root whose name matches .env* or a `mask`
-#   pattern is overmounted with /dev/null.
-#   /mnt is an empty tmpfs, and /init and /run are absent, so on WSL the
-#   Windows drives, the interop binfmt handler and the WSL_INTEROP socket are
-#   unreachable. WSL_INTEROP and WSLENV are unset.
+#   pattern is overmounted with /dev/null. The search prunes directories
+#   named node_modules, .git, .venv, venv and __pycache__, so files inside
+#   them are not masked.
+#   /mnt is an empty tmpfs and /run is absent, except that the target of
+#   /etc/resolv.conf, when it resolves outside /etc, is bound read-only and
+#   can lie under /mnt or /run. On WSL the Windows drives and the WSL_INTEROP
+#   socket are unreachable. WSL_INTEROP and WSLENV are unset. /init is
+#   absent; whether that disables the WSLInterop binfmt_misc handler depends
+#   on the handler's registration flags and is untested.
 #   The network is shared, because the Codex API needs it.
 #
 # Settings (environment):

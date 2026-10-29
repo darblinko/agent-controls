@@ -42,7 +42,7 @@
 
     <section>
       <h2>How it works</h2>
-      <p><code>bin/codex-sandbox</code> starts Codex in a bubblewrap mount namespace that holds only the configured root containing the current directory, the tool and state paths from the config, and read-only system directories. <code>.env*</code> files and other masked names are overmounted with <code>/dev/null</code>. On WSL, <code>/mnt</code> is empty and <code>/init</code>, <code>/run</code>, <code>WSL_INTEROP</code> and <code>WSLENV</code> are removed.</p>
+      <p><code>bin/codex-sandbox</code> starts Codex in a bubblewrap mount namespace that holds only the configured root containing the current directory, the tool and state paths from the config, and read-only system directories. <code>.env*</code> files and other masked names are overmounted with <code>/dev/null</code>, except inside directories named <code>node_modules</code>, <code>.git</code>, <code>.venv</code>, <code>venv</code> and <code>__pycache__</code>, which the search prunes. On WSL, <code>/mnt</code> is empty, <code>/init</code> and <code>/run</code> are absent, and <code>WSL_INTEROP</code> and <code>WSLENV</code> are unset. The one exception is the target of <code>/etc/resolv.conf</code>, bound read-only when it resolves outside <code>/etc</code>, which can lie under <code>/mnt</code> or <code>/run</code>.</p>
       <pre class="mermaid">
 flowchart TD
   cmd["codex ..."] --> wrapper["codex-sandbox"]
@@ -54,7 +54,7 @@ flowchart TD
     root["matched root: rw, ro, or listed subtrees"]
     extra["tool and state paths"]
     empty["empty tmpfs: /tmp, /home, HOME, /mnt"]
-    masked[".env* and mask files over /dev/null"]
+    masked[".env* and mask files over /dev/null, pruned dirs excepted"]
     sys ~~~ root ~~~ extra ~~~ empty ~~~ masked
   end
       </pre>
@@ -107,7 +107,8 @@ export CODEX_SANDBOX_DRY_RUN=1
       <h2>Limitations</h2>
       <ul>
         <li>The network is shared with Codex. The sandbox limits what Codex can read; anything inside the bound root can still be sent anywhere the machine can reach.</li>
-        <li>Masking matches file names when Codex starts. Secrets under other names, files created later and symbolic links are not masked.</li>
+        <li>Masking matches file names when Codex starts. Secrets under other names, files created later, symbolic links and files inside the pruned directories are not masked.</li>
+        <li>The tests check that <code>/run</code> and <code>/init</code> are not bound and that <code>WSL_INTEROP</code> and <code>WSLENV</code> are unset. Whether an absent <code>/init</code> disables the WSLInterop binfmt_misc handler depends on its registration flags and is untested.</li>
         <li>The calling shell's environment passes into the namespace, except <code>WSL_INTEROP</code>, <code>WSLENV</code> and <code>unsetenv</code> entries.</li>
         <li>After the last review round, Claude may stop with blockers still open. They are logged in <code>.ai/reports/qa_decisions.jsonl</code>.</li>
         <li>The gate reviews uncommitted changes only.</li>

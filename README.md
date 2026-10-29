@@ -23,7 +23,7 @@ Source: `uvx pytest --collect-only -q; hooks/codex-review-gate.sh`
 
 ## What it does
 
-- **`bin/codex-sandbox`** runs Codex in a mount namespace that contains only the working root you are in. Other repositories, dotfiles in `$HOME`, `.env` files and, on WSL, the Windows drives do not exist inside it.
+- **`bin/codex-sandbox`** runs Codex in a mount namespace that contains only the working root you are in. Other repositories, dotfiles in `$HOME` and, on WSL, the Windows drives do not exist inside it. `.env*` files in the root are overmounted with `/dev/null`, except inside the pruned directories listed under limitations.
 - **`hooks/codex-review-gate.sh`** runs the project's tests and a Codex review of the uncommitted changes each time Claude tries to stop. Failing tests or blocking review findings send Claude back to work.
 - The gate caps review rounds (`REVIEW_GATE_MAX_ROUNDS`, default 2) and logs every verdict and override to `.ai/reports/qa_decisions.jsonl`.
 - **`shell/claude-profiles.sh`** defines `claude_profile <name>`, which gives each account or engagement its own Claude Code config directory and, optionally, its own long-lived OAuth token.
@@ -46,13 +46,13 @@ flowchart TD
     root["matched root: rw, ro, or listed subtrees"]
     extra["tool and state paths"]
     empty["empty tmpfs: /tmp, /home, HOME, /mnt"]
-    masked[".env* and mask files over /dev/null"]
+    masked[".env* and mask files over /dev/null, pruned dirs excepted"]
     sys ~~~ root ~~~ extra ~~~ empty ~~~ masked
   end
   subgraph gone["not present"]
     other["other roots and repositories"]
     dot["dotfiles in HOME"]
-    wsl["/init, /run, Windows drives"]
+    wsl["/init, Windows drives, /run except a resolv.conf target"]
     other ~~~ dot ~~~ wsl
   end
 ```
@@ -181,7 +181,8 @@ tests/                         pytest suite that drives the scripts
 
 - The read-only Codex policy is not treated as a read boundary, because of the 2026-08-30 probe above. The Codex version used in that probe was not recorded.
 - The network is shared with Codex. Anything inside the bound root can leave the machine. The sandbox limits what Codex can read; it does not limit where Codex can send it.
-- `.env*` and `mask` patterns are matched by file name when Codex starts. Secrets under other names, files created later and symbolic links are not masked.
+- `.env*` and `mask` patterns are matched by file name when Codex starts. Secrets under other names, files created later and symbolic links are not masked. The search prunes directories named `node_modules`, `.git`, `.venv`, `venv` and `__pycache__`, so a `.env` file inside one of them stays readable.
+- `/run` is absent except when `/etc/resolv.conf` resolves into it; that one file is then bound read-only. `/init` is absent. The tests check that `/run` and `/init` are not bound and that `WSL_INTEROP` and `WSLENV` are unset. Whether an absent `/init` disables the WSLInterop binfmt_misc handler depends on its registration flags and is untested.
 - The calling shell's environment passes into the namespace, except `WSL_INTEROP`, `WSLENV` and `unsetenv` entries.
 - After the last review round, Claude may stop with blockers still open. They are logged, and a person has to read the log.
 - The gate reviews uncommitted changes only. Work committed before Claude stops is not reviewed.
