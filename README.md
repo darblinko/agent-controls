@@ -1,0 +1,194 @@
+# agent-controls
+
+Three controls for running coding agents on a Linux or WSL2 workstation: a bubblewrap sandbox for the Codex CLI, a Codex review gate for Claude Code's Stop hook, and per-profile Claude Code configuration.
+
+<!-- chart: hero -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/hero-dark.svg">
+  <img alt="66 tests of the three controls, 5 of them inside a real bubblewrap namespace; the review gate defaults to 2 rounds per batch and a 204,800 byte prompt." src="docs/figures/hero-light.svg" width="760">
+</picture>
+
+<details><summary>Data table</summary>
+
+| Measure | Value |
+|---|---|
+| Control tests | 66 |
+| Namespace runs | 5 |
+| Review rounds | 2 |
+| Prompt cap, bytes | 204,800 |
+
+Source: `uvx pytest --collect-only -q; hooks/codex-review-gate.sh`
+
+</details>
+
+## What it does
+
+- **`bin/codex-sandbox`** runs Codex in a mount namespace that contains only the working root you are in. Other repositories, dotfiles in `$HOME`, `.env` files and, on WSL, the Windows drives do not exist inside it.
+- **`hooks/codex-review-gate.sh`** runs the project's tests and a Codex review of the uncommitted changes each time Claude tries to stop. Failing tests or blocking review findings send Claude back to work.
+- The gate caps review rounds (`REVIEW_GATE_MAX_ROUNDS`, default 2) and logs every verdict and override to `.ai/reports/qa_decisions.jsonl`.
+- **`shell/claude-profiles.sh`** defines `claude_profile <name>`, which gives each account or engagement its own Claude Code config directory and, optionally, its own long-lived OAuth token.
+- [docs/threat-model.md](docs/threat-model.md) lists, per control, the threats it addresses, the ones it does not, and the test that checks each claim.
+
+## How it works
+
+### codex-sandbox
+
+Codex's `--sandbox read-only` policy restricts writes and leaves reads open. A probe on 2026-08-30, recorded in the header of `bin/codex-sandbox`, showed Codex in read-only mode reading a file outside its working directory and listing an unrelated repository. The wrapper enforces the read boundary with bubblewrap: a path that is not bound into the namespace does not exist for Codex.
+
+```mermaid
+flowchart TD
+  cmd["codex ..."] --> wrapper["codex-sandbox"]
+  conf[("sandbox.conf")] --> wrapper
+  wrapper -->|"cwd outside every root"| refuse["exit 1"]
+  wrapper -->|"cwd inside a root"| ns
+  subgraph ns["bubblewrap namespace"]
+    sys["/usr and /etc, read-only"]
+    root["matched root: rw, ro, or listed subtrees"]
+    extra["tool and state paths"]
+    empty["empty tmpfs: /tmp, /home, HOME, /mnt"]
+    masked[".env* and mask files over /dev/null"]
+    sys ~~~ root ~~~ extra ~~~ empty ~~~ masked
+  end
+  subgraph gone["not present"]
+    other["other roots and repositories"]
+    dot["dotfiles in HOME"]
+    wsl["/init, /run, Windows drives"]
+    other ~~~ dot ~~~ wsl
+  end
+```
+
+The config file lists working roots (`rw` or `ro`), read-only `tool` paths such as the Node install that Codex runs from, read-write `state` paths such as `~/.codex`, and environment changes. A read-only root can be limited to named subtrees; its `.git` is then absent, and `codex exec` gets `--skip-git-repo-check`. [examples/sandbox.conf](examples/sandbox.conf) documents every keyword.
+
+### codex-review-gate
+
+```mermaid
+flowchart TD
+  stop["Claude tries to stop"] --> changes{"uncommitted changes?"}
+  changes -->|"no, or this state is already approved"| allow["exit 0: Claude stops"]
+  changes -->|"yes"| tests{"REVIEW_GATE_TEST_CMD passes?"}
+  tests -->|"no"| fixtests["exit 2: test output to Claude"]
+  tests -->|"yes"| review["codex exec review, round N"]
+  review -->|"APPROVED"| record["write approval"] --> allow
+  review -->|"CHANGES_REQUESTED, rounds left"| fix["exit 2: review to Claude"]
+  review -->|"CHANGES_REQUESTED, last round"| override["log override"] --> allow
+  review -->|"Codex error or unparseable"| notify["exit 1: user sees error, no approval"]
+  fixtests --> stop
+  fix --> stop
+```
+
+Round 1 is a full review. Later rounds verify only the fixes for the previous round's blockers. A round counts only when Codex returns a verdict, so a test failure or a Codex outage does not use one. A change to the set of changed files starts a new batch at round 1. The approval records a hash of HEAD, the status, the diff and the untracked file contents, so any later edit triggers a new review. Codex's prompt is assembled from `templates/codex_reviewer.md`, the diffs, the untracked files and the test output, capped at 204800 bytes (`REVIEW_GATE_MAX_PROMPT_BYTES` default in `hooks/codex-review-gate.sh`).
+
+### claude_profile
+
+`claude_profile work` runs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-work`. If `~/.config/claude-tokens/work` exists and is non-empty, its contents become `CLAUDE_CODE_OAUTH_TOKEN` for that run. Settings, permissions, hooks, plugins, memory and transcripts stay per profile. A `GH_CONFIG_DIR=...` prefix on an alias pairs a profile with a GitHub CLI identity.
+
+## Verification
+
+<!-- chart: tests-per-control -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/tests-per-control-dark.svg">
+  <img alt="The review gate has 27 tests, codex-sandbox has 21 argument checks and 5 namespace runs, and claude_profile has 13 tests." src="docs/figures/tests-per-control-light.svg" width="760">
+</picture>
+
+<details><summary>Data table</summary>
+
+| Item | Value |
+|---|---|
+| review gate | 27 |
+| sandbox arguments | 21 |
+| claude_profile | 13 |
+| sandbox namespace runs | 5 |
+
+Source: `uvx pytest --collect-only -q`
+
+</details>
+
+| Test file | What it checks |
+|---|---|
+| tests/test_codex_sandbox.py | 21 checks of the bwrap arguments built from a config (binds, masks, subtree roots, refusals, WSL routes, config errors), and 5 runs of a stand-in Codex inside a real namespace: files outside the root are absent, `.env` content is unreadable, `ro` roots refuse writes, `$HOME` and `/mnt` are empty, `/init` is absent |
+| tests/test_review_gate.py | 27 runs of the gate against a throwaway git repository with Codex replaced by a stub: approval, blocking, the round cap and override, batch reset, test failures, reviewer failures, locking, prompt cap, dispute logging |
+| tests/test_claude_profiles.py | 13 checks of config dir and token selection, and refusal of unsafe profile names |
+| tests/test_links.py | Every relative link and image in the Markdown and HTML files resolves |
+
+The namespace tests are skipped where bubblewrap cannot create a namespace. CI installs bubblewrap and enables unprivileged user namespaces so they run there ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+
+## Quickstart
+
+Requirements: bash 4.4 or later, git, Python 3.10 or later, [uv](https://docs.astral.sh/uv/), and bubblewrap (`apt install bubblewrap`) for the sandbox.
+
+```bash
+git clone https://github.com/darblinko/agent-controls
+cd agent-controls
+uvx pytest -q
+uvx --from shellcheck-py shellcheck bin/codex-sandbox hooks/codex-review-gate.sh shell/claude-profiles.sh
+```
+
+### Install the sandbox
+
+```bash
+mkdir -p ~/.local/bin ~/.config/agent-controls
+cp examples/sandbox.conf ~/.config/agent-controls/sandbox.conf   # edit the roots and tool paths
+ln -s "$PWD/bin/codex-sandbox" ~/.local/bin/codex                  # must come before the real codex on PATH
+cd ~/src/my-app                                                    # a configured root
+CODEX_SANDBOX_DRY_RUN=1 codex exec "list the files"                # print the bwrap command
+codex exec "list the files"
+```
+
+The wrapper finds the real Codex as the next `codex` on `PATH`; set `CODEX_BIN` to override. `CODEX_UNCONFINED=1` bypasses the namespace.
+
+### Install the review gate in a project
+
+```bash
+cd ~/src/my-app
+mkdir -p hooks .ai
+cp /path/to/agent-controls/hooks/codex-review-gate.sh /path/to/agent-controls/hooks/review_gate.py hooks/
+cp /path/to/agent-controls/templates/codex_reviewer.md /path/to/agent-controls/templates/codex_review_schema.json .ai/
+echo '.ai/reports/' >> .gitignore
+```
+
+Merge [examples/claude-settings.json](examples/claude-settings.json) into `.claude/settings.json` and set the test command in it. Copy [examples/review-gate-command.md](examples/review-gate-command.md) to `.claude/commands/review-gate.md` for a `/review-gate on|off|status` command. Edit `.ai/codex_reviewer.md` to add project-specific blocking criteria.
+
+### Use profiles
+
+```bash
+echo ". $PWD/shell/claude-profiles.sh" >> ~/.bashrc
+alias work='cd ~/src/work && GH_CONFIG_DIR=$HOME/.config/gh-work claude_profile work'
+```
+
+For a separate account, store a long-lived token from `claude setup-token`:
+
+```bash
+install -d -m 700 ~/.config/claude-tokens
+(umask 077 && cat > ~/.config/claude-tokens/work)   # paste the token, then Ctrl-D
+```
+
+## Project layout
+
+```text
+bin/codex-sandbox              bubblewrap wrapper for the Codex CLI
+hooks/codex-review-gate.sh     Claude Code Stop hook
+hooks/review_gate.py           verdict parsing and decision log entries for the hook
+shell/claude-profiles.sh       claude_profile function
+templates/                     reviewer prompt and review JSON schema for .ai/
+examples/                      sandbox.conf, Stop hook settings, /review-gate command
+docs/threat-model.md           threats, mechanisms, gaps, tests
+docs/data.json, docs/figures/  figure data and the SVGs generated from it
+docs/index.html                landing page for GitHub Pages, charts from docs/data.json
+tests/                         pytest suite that drives the scripts
+```
+
+## Design decisions and limitations
+
+- The read-only Codex policy is not treated as a read boundary, because of the 2026-08-30 probe above. The Codex version used in that probe was not recorded.
+- The network is shared with Codex. Anything inside the bound root can leave the machine. The sandbox limits what Codex can read; it does not limit where Codex can send it.
+- `.env*` and `mask` patterns are matched by file name when Codex starts. Secrets under other names, files created later and symbolic links are not masked.
+- The calling shell's environment passes into the namespace, except `WSL_INTEROP`, `WSLENV` and `unsetenv` entries.
+- After the last review round, Claude may stop with blockers still open. They are logged, and a person has to read the log.
+- The gate reviews uncommitted changes only. Work committed before Claude stops is not reviewed.
+- A reviewer failure exits 1, which Claude Code reports to the user without blocking. A gate that blocked on its own failures could hold Claude in a loop it cannot resolve.
+- The gate is disabled with a marker file, `.ai/reports/disabled`, because an environment variable exported from a Claude Code Bash tool call does not reach the hook process.
+- Profile tokens travel as an environment variable and are readable by the same user's processes. See [docs/threat-model.md](docs/threat-model.md).
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE). Copyright 2026 Mitchell Foutz.
