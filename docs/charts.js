@@ -5,7 +5,9 @@
   "use strict";
 
   var NS = "http://www.w3.org/2000/svg";
-  var WIDTH = 660;
+  // Charts are drawn at the figure's own width (between MIN_WIDTH and MAX_WIDTH) so text
+  // stays at its set size on narrow screens; below NARROW the hbar labels move above the bars.
+  var MAX_WIDTH = 660, MIN_WIDTH = 280, NARROW = 480;
   var SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
   var MAX_SERIES = 4;
 
@@ -99,11 +101,12 @@
     target.addEventListener("blur", hide);
   }
 
-  function renderHbar(chart, svg, tip) {
-    var style = chart.format, rows = chart.data;
-    var labelW = Math.min(240, Math.max.apply(null, rows.map(function (r) { return r.label.length * 7.3; })) + 12);
+  function renderHbar(chart, svg, tip, width) {
+    var style = chart.format, rows = chart.data, stacked = width < NARROW;
+    var labelW = stacked ? 0 : Math.min(240, Math.max.apply(null, rows.map(function (r) { return r.label.length * 7.3; })) + 12);
     var domainMax = chart.max || Math.max.apply(null, rows.map(function (r) { return r.value; })) * 1.1;
-    var x0 = labelW, x1 = WIDTH - 96, scale = (x1 - x0) / domainMax, band = 36, thick = 20, top = 22;
+    var labelGap = stacked ? 18 : 0;
+    var x0 = labelW, x1 = width - 96, scale = (x1 - x0) / domainMax, band = 36 + labelGap, thick = 20, top = 22;
     var bottom = top + band * rows.length;
     niceTicks(0, domainMax, 4).filter(function (t) { return t <= domainMax * 1.0001; }).forEach(function (t) {
       var x = x0 + t * scale;
@@ -116,14 +119,15 @@
       label(svg, tx + 4, top - 12, chart.threshold.label, 11, "var(--ink-2)");
     }
     rows.forEach(function (row, i) {
-      var y = top + i * band + (band - thick) / 2, w = Math.max(row.value * scale, 1);
+      var y = top + i * band + labelGap + (band - labelGap - thick) / 2, w = Math.max(row.value * scale, 1);
       var color = row.status === "pass" ? "var(--good)" : row.status === "fail" ? "var(--critical)" : SERIES[0];
       var text = fmt(row.value, style) + (row.status ? "  " + row.status : "");
-      label(svg, 0, y + thick / 2 + 4.5, row.label, 13);
+      if (stacked) label(svg, 0, y - 6, row.label, 13);
+      else label(svg, 0, y + thick / 2 + 4.5, row.label, 13);
       var mark = node("path", { d: barPath(x0, y, w, thick, "right"), fill: color }, svg);
       node("rect", { x: x0 + w + 3, y: y + 1, width: text.length * 7.6 + 8, height: thick - 2, fill: "var(--surface)" }, svg);
       label(svg, x0 + w + 6, y + thick / 2 + 4.5, text, 13, "var(--ink)", 600);
-      var hit = node("rect", { class: "hit", x: 0, y: top + i * band, width: WIDTH, height: band }, svg);
+      var hit = node("rect", { class: "hit", x: 0, y: top + i * band, width: width, height: band }, svg);
       bindHover(hit, mark, tip, row.label, [{ color: color, value: text, name: row.note || "" }]);
     });
     node("line", { x1: x0, y1: top - 6, x2: x0, y2: bottom, stroke: "var(--axis)" }, svg);
@@ -138,23 +142,26 @@
     });
   }
 
-  function renderColumns(chart, svg, tip) {
+  function renderColumns(chart, svg, tip, width) {
     var style = chart.format, series = chart.series.slice(0, MAX_SERIES), cats = chart.categories;
     var ticks = niceTicks(0, chart.max || Math.max.apply(null, series.map(function (s) { return Math.max.apply(null, s.values); })));
-    var left = 44, right = WIDTH, top = 14, bottom = 254;
+    var left = 44, right = width, top = 14, bottom = 254;
     var scaleY = function (v) { return bottom - (v - ticks[0]) / (ticks[ticks.length - 1] - ticks[0]) * (bottom - top); };
     yAxis(svg, ticks, scaleY, left, right, style);
     var slot = (right - left) / cats.length;
     var barW = Math.min(24, (slot * 0.7 - 2 * (series.length - 1)) / series.length);
     var groupW = barW * series.length + 2 * (series.length - 1);
+    var catLabelW = Math.max.apply(null, cats.map(function (c) { return String(c).length * 6.4; })) + 8;
+    var every = Math.max(1, Math.ceil(catLabelW / slot));
+    var valueLabels = series.length === 1 && cats.length <= 12 && slot >= 34;
     cats.forEach(function (cat, ci) {
       var gx = left + ci * slot + (slot - groupW) / 2, group = node("g", {}, svg);
       series.forEach(function (s, si) {
         var x = gx + si * (barW + 2), y = scaleY(s.values[ci]);
         node("path", { d: barPath(x, y, barW, Math.max(bottom - y, 1), "up"), fill: SERIES[si] }, group);
-        if (series.length === 1 && cats.length <= 12) label(svg, x + barW / 2, y - 6, fmt(s.values[ci], style), 11, "var(--ink)", 600, "middle");
+        if (valueLabels) label(svg, x + barW / 2, y - 6, fmt(s.values[ci], style), 11, "var(--ink)", 600, "middle");
       });
-      label(svg, left + ci * slot + slot / 2, bottom + 18, cat, 11, "var(--ink-2)", 400, "middle");
+      if (ci % every === 0) label(svg, left + ci * slot + slot / 2, bottom + 18, cat, 11, "var(--ink-2)", 400, "middle");
       var hit = node("rect", { class: "hit", x: left + ci * slot, y: top, width: slot, height: bottom - top }, svg);
       bindHover(hit, group, tip, cat, series.map(function (s, si) {
         return { color: SERIES[si], value: fmt(s.values[ci], style), name: series.length > 1 ? s.name : "" };
@@ -163,16 +170,16 @@
     return bottom + 30;
   }
 
-  function renderLine(chart, svg, tip) {
+  function renderLine(chart, svg, tip, width) {
     var style = chart.format, series = chart.series.slice(0, MAX_SERIES), xs = chart.x;
     var values = [].concat.apply([], series.map(function (s) { return s.values; })).filter(function (v) { return v !== null; });
     var ticks = niceTicks(chart.min !== undefined ? chart.min : Math.min(0, Math.min.apply(null, values)), chart.max || Math.max.apply(null, values));
-    var left = 44, right = WIDTH - 110, top = 14, bottom = 254;
+    var left = 44, right = width - 110, top = 14, bottom = 254;
     var scaleY = function (v) { return bottom - (v - ticks[0]) / (ticks[ticks.length - 1] - ticks[0]) * (bottom - top); };
     var scaleX = function (i) { return left + i * (right - left) / Math.max(xs.length - 1, 1); };
     yAxis(svg, ticks, scaleY, left, right, style);
-    var every = Math.max(1, Math.ceil(xs.length / 8));
-    xs.forEach(function (x, i) { if (i % every === 0 || i === xs.length - 1) label(svg, scaleX(i), bottom + 18, x, 11, "var(--muted)", 400, "middle"); });
+    var every = Math.max(1, Math.ceil(xs.length / (width < NARROW ? 4 : 8)));
+    xs.forEach(function (x, i) { if ((xs.length - 1 - i) % every === 0) label(svg, scaleX(i), bottom + 18, x, 11, "var(--muted)", 400, "middle"); });
     var cross = node("line", { x1: 0, y1: top, x2: 0, y2: bottom, stroke: "var(--ink-2)", visibility: "hidden" }, svg);
     series.forEach(function (s, si) {
       var pts = s.values.map(function (v, i) { return v === null ? null : [scaleX(i), scaleY(v)]; }).filter(Boolean);
@@ -185,7 +192,7 @@
     var hit = node("rect", { class: "hit", x: left, y: top, width: right - left, height: bottom - top, tabindex: "0" }, svg);
     hit.setAttribute("aria-label", chart.title + ": use the data table for values");
     hit.addEventListener("pointermove", function (event) {
-      var box = svg.getBoundingClientRect(), px = (event.clientX - box.left) * WIDTH / box.width;
+      var box = svg.getBoundingClientRect(), px = (event.clientX - box.left) * width / box.width;
       var i = Math.max(0, Math.min(xs.length - 1, Math.round((px - left) / ((right - left) / Math.max(xs.length - 1, 1)))));
       cross.setAttribute("x1", scaleX(i)); cross.setAttribute("x2", scaleX(i)); cross.setAttribute("visibility", "visible");
       tip.show(event, String(xs[i]), series.map(function (s, si) { return { color: SERIES[si], value: fmt(s.values[i], style), name: s.name }; }));
@@ -242,7 +249,14 @@
     });
   }
 
+  function chartWidth(figure) {
+    var padding = parseFloat(getComputedStyle(figure).paddingLeft) + parseFloat(getComputedStyle(figure).paddingRight);
+    return Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, figure.clientWidth - padding)));
+  }
+
   function renderChart(figure, chart) {
+    var width = chartWidth(figure);
+    figure.dataset.renderedWidth = String(width);
     figure.replaceChildren();
     html("p", { class: "chart-title", text: chart.title }, figure);
     if (chart.subtitle) html("p", { class: "chart-subtitle", text: chart.subtitle }, figure);
@@ -253,8 +267,8 @@
       var svg = node("svg", { role: "img", "aria-label": chart.alt || chart.title }, figure);
       var tip = tooltipFor(figure);
       var renderer = { hbar: renderHbar, columns: renderColumns, line: renderLine }[chart.type];
-      var height = renderer(chart, svg, tip);
-      svg.setAttribute("viewBox", "-4 -16 " + (WIDTH + 8) + " " + (height + 16));
+      var height = renderer(chart, svg, tip, width);
+      svg.setAttribute("viewBox", "-4 -16 " + (width + 8) + " " + (height + 16));
     }
     var foot = html("div", { class: "chart-foot" }, figure);
     html("span", { text: "Source: " + chart.source }, foot);
@@ -270,6 +284,18 @@
     });
   }
 
+  function rerenderOnResize(figures, byName) {
+    if (typeof ResizeObserver === "undefined") return;
+    var observer = new ResizeObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var figure = entry.target, chart = byName[figure.dataset.chart];
+        if (!chart || chart.type === "stats") return;
+        if (Math.abs(chartWidth(figure) - Number(figure.dataset.renderedWidth)) >= 24) renderChart(figure, chart);
+      });
+    });
+    figures.forEach(function (figure) { observer.observe(figure); });
+  }
+
   function start() {
     var figures = document.querySelectorAll("figure.chart[data-chart]");
     if (!figures.length) return;
@@ -281,6 +307,7 @@
         if (chart) renderChart(figure, chart);
         else figure.textContent = "Chart \"" + figure.dataset.chart + "\" is missing from data.json.";
       });
+      rerenderOnResize(figures, byName);
     }).catch(function (error) {
       figures.forEach(function (figure) { figure.textContent = "Charts could not load: " + error.message; });
     });

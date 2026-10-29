@@ -168,6 +168,7 @@ pre {
   padding: 16px;
   text-align: center;
   font-family: var(--sans);
+  overflow-x: auto;
 }
 
 /* Charts */
@@ -226,7 +227,7 @@ pre {
 
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-top: 12px; }
 .stat { border-left: 2px solid var(--axis); padding-left: 14px; }
-.stat-value { font-size: 34px; line-height: 1.1; font-weight: 600; }
+.stat-value { font-size: clamp(26px, 7vw, 34px); line-height: 1.1; font-weight: 600; white-space: nowrap; }
 .stat-label { font-size: 14px; color: var(--ink-2); }
 .stat-note { font-size: 12px; color: var(--muted); }
 
@@ -244,6 +245,11 @@ footer {
   section > .note { grid-column: 1; grid-row: auto; margin-top: 8px; }
   .record > div { border-left: 0; border-top: 1px solid var(--rule); }
   .record > div:first-child { border-top: 0; }
+}
+
+/* Wide diagrams scroll inside their box on phones instead of shrinking below legible size. */
+@media (max-width: 600px) {
+  .mermaid svg { min-width: 520px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
