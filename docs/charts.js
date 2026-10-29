@@ -10,12 +10,14 @@
   var MAX_WIDTH = 660, MIN_WIDTH = 280, NARROW = 480;
   var SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
   var MAX_SERIES = 4;
+  var END_LABEL_ROOM = 96;
 
   function fmt(value, style) {
     if (value === null || value === undefined) return "";
     if (style === "percent") {
       var scaled = value * 100;
-      return (Math.abs(scaled - Math.round(scaled)) < 0.05 ? scaled.toFixed(0) : scaled.toFixed(1)) + "%";
+      var places = Math.abs(scaled - Math.round(scaled)) < 0.05 ? 0 : Math.abs(scaled) < 1 ? 2 : 1;
+      return scaled.toFixed(places) + "%";
     }
     if (style === "decimal2") return value.toFixed(2);
     if (style === "decimal3") return value.toFixed(3);
@@ -181,14 +183,21 @@
     var every = Math.max(1, Math.ceil(xs.length / (width < NARROW ? 4 : 8)));
     xs.forEach(function (x, i) { if ((xs.length - 1 - i) % every === 0) label(svg, scaleX(i), bottom + 18, x, 11, "var(--muted)", 400, "middle"); });
     var cross = node("line", { x1: 0, y1: top, x2: 0, y2: bottom, stroke: "var(--ink-2)", visibility: "hidden" }, svg);
+    var ends = [];
     series.forEach(function (s, si) {
       var pts = s.values.map(function (v, i) { return v === null ? null : [scaleX(i), scaleY(v)]; }).filter(Boolean);
       node("polyline", { points: pts.map(function (p) { return p.join(","); }).join(" "), fill: "none", stroke: SERIES[si],
         "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
       var end = pts[pts.length - 1];
       node("circle", { cx: end[0], cy: end[1], r: 4, fill: SERIES[si], stroke: "var(--surface)", "stroke-width": 2 }, svg);
-      label(svg, end[0] + 10, end[1] + 4, (series.length > 1 ? s.name + " " : "") + fmt(s.values[s.values.length - 1], style), 12, "var(--ink)", 600);
+      var value = fmt(s.values[s.values.length - 1], style), named = s.name + " " + value;
+      ends.push({ x: end[0], y: end[1], text: series.length > 1 && named.length * 12 * 0.56 <= END_LABEL_ROOM ? named : value });
     });
+    // Skip all end labels when any two would overlap; the legend and tooltip still identify each series.
+    var endYs = ends.map(function (e) { return e.y; }).sort(function (a, b) { return a - b; });
+    if (endYs.every(function (y, i) { return i === 0 || y - endYs[i - 1] >= 14; })) {
+      ends.forEach(function (e) { label(svg, e.x + 10, e.y + 4, e.text, 12, "var(--ink)", 600); });
+    }
     var hit = node("rect", { class: "hit", x: left, y: top, width: right - left, height: bottom - top, tabindex: "0" }, svg);
     hit.setAttribute("aria-label", chart.title + ": use the data table for values");
     hit.addEventListener("pointermove", function (event) {
