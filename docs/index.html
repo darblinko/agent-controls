@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agent-controls</title>
+  <meta name="description" content="A bubblewrap sandbox for the Codex CLI, a Codex review gate for Claude Code's Stop hook, and per-profile Claude Code configuration.">
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;600&display=swap">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <header class="site-bar">
+    <a href="https://darblinko.github.io/">Mitchell Foutz</a>
+    <a href="https://github.com/darblinko/agent-controls">Source on GitHub</a>
+  </header>
+
+  <main>
+    <section class="intro">
+      <h1>agent-controls</h1>
+      <p class="lede">Three shell controls for developers who run Claude Code and the Codex CLI on a Linux or WSL2 workstation: a read boundary for Codex, a second review before Claude stops, and separate Claude Code profiles per account.</p>
+      <dl class="record">
+        <div><dt>Repository</dt><dd>darblinko/agent-controls</dd></div>
+        <div><dt>Revision</dt><dd><code>b42826c</code></dd></div>
+        <div><dt>Measured</dt><dd>2026-10-28</dd></div>
+        <div><dt>License</dt><dd>Apache-2.0</dd></div>
+      </dl>
+      <figure class="chart" data-chart="hero"></figure>
+    </section>
+
+    <section>
+      <h2>Problem</h2>
+      <p>An agent process runs as the developer's user and can read whatever that user can read: other repositories, <code>.env</code> files, cloud and GitHub credentials, other Claude Code profiles and, on WSL, the Windows drives. Anything it reads can become part of a prompt sent to the model provider.</p>
+      <p>Codex's <code>--sandbox read-only</code> policy restricts writes and leaves reads open. In a probe on 2026-08-30, Codex started in read-only mode read a file at an arbitrary absolute path outside its <code>--cd</code> directory and listed the root of an unrelated repository. Project trust settings in <code>config.toml</code> govern approval prompts and do not set filesystem scope.</p>
+      <p>Separately, Claude Code can stop with failing tests or with changes no second reviewer has seen, and a session can run under the wrong account.</p>
+      <aside class="note">
+        <p>The probe is recorded in the header of <code>bin/codex-sandbox</code>. The Codex version used was not recorded. The reproduction steps are in <code>docs/threat-model.md</code>.</p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <p><code>bin/codex-sandbox</code> starts Codex in a bubblewrap mount namespace that holds only the configured root containing the current directory, the tool and state paths from the config, and read-only system directories. <code>.env*</code> files and other masked names are overmounted with <code>/dev/null</code>. On WSL, <code>/mnt</code> is empty and <code>/init</code>, <code>/run</code>, <code>WSL_INTEROP</code> and <code>WSLENV</code> are removed.</p>
+      <pre class="mermaid">
+flowchart TD
+  cmd["codex ..."] --> wrapper["codex-sandbox"]
+  conf[("sandbox.conf")] --> wrapper
+  wrapper -->|"cwd outside every root"| refuse["exit 1"]
+  wrapper -->|"cwd inside a root"| ns
+  subgraph ns["bubblewrap namespace"]
+    sys["/usr and /etc, read-only"]
+    root["matched root: rw, ro, or listed subtrees"]
+    extra["tool and state paths"]
+    empty["empty tmpfs: /tmp, /home, HOME, /mnt"]
+    masked[".env* and mask files over /dev/null"]
+    sys ~~~ root ~~~ extra ~~~ empty ~~~ masked
+  end
+      </pre>
+      <p><code>hooks/codex-review-gate.sh</code> is a Claude Code Stop hook. It runs the project's tests, then a Codex review of the uncommitted changes. Blocking findings return exit 2 and Claude continues. Rounds are capped per batch of changed files; after the last round the gate lets Claude stop and logs the open blockers.</p>
+      <pre class="mermaid">
+flowchart TD
+  stop["Claude tries to stop"] --> changes{"uncommitted changes?"}
+  changes -->|"no, or this state is already approved"| allow["exit 0: Claude stops"]
+  changes -->|"yes"| tests{"REVIEW_GATE_TEST_CMD passes?"}
+  tests -->|"no"| fixtests["exit 2: test output to Claude"]
+  tests -->|"yes"| review["codex exec review, round N"]
+  review -->|"APPROVED"| record["write approval"] --> allow
+  review -->|"CHANGES_REQUESTED, rounds left"| fix["exit 2: review to Claude"]
+  review -->|"CHANGES_REQUESTED, last round"| override["log override"] --> allow
+  review -->|"Codex error or unparseable"| notify["exit 1: user sees error, no approval"]
+      </pre>
+      <p><code>shell/claude-profiles.sh</code> defines <code>claude_profile &lt;name&gt;</code>, which sets <code>CLAUDE_CONFIG_DIR=~/.claude-&lt;name&gt;</code> and, when a token file for that profile exists, <code>CLAUDE_CODE_OAUTH_TOKEN</code>.</p>
+      <aside class="note">
+        <p>Round cap: <code>REVIEW_GATE_MAX_ROUNDS</code>, default 2. Prompt cap: <code>REVIEW_GATE_MAX_PROMPT_BYTES</code>, default 204800. Both in <code>hooks/codex-review-gate.sh</code>.</p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>Measured results</h2>
+      <p>The test suite drives the scripts directly. The sandbox tests check the bwrap arguments built from a config, and 5 of them start a stand-in Codex inside a real namespace. The gate tests run the hook against a throwaway git repository with Codex replaced by a stub. All 66 control tests pass at <code>b42826c</code>.</p>
+      <figure class="chart" data-chart="tests-per-control"></figure>
+      <aside class="note">
+        <p>Reproduce: <code>uvx pytest -v</code>. Counts: <code>uvx pytest --collect-only -q</code>. The namespace tests are skipped where bubblewrap cannot create a namespace. The link check in <code>tests/test_links.py</code> is not counted.</p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>Run it</h2>
+      <ol class="steps">
+        <li><pre><code>git clone https://github.com/darblinko/agent-controls ~/agent-controls
+cd ~/agent-controls</code></pre></li>
+        <li><pre><code>uvx pytest -q</code></pre></li>
+        <li><pre><code>mkdir -p ~/.config/agent-controls
+cp examples/sandbox.conf ~/.config/agent-controls/sandbox.conf</code></pre></li>
+        <li><pre><code>cd ~/src/my-app
+export CODEX_SANDBOX_DRY_RUN=1
+~/agent-controls/bin/codex-sandbox exec "ls"</code></pre></li>
+      </ol>
+      <aside class="note">
+        <p>Requirements: bash 4.4 or later, git, Python 3.10 or later, uv, and bubblewrap. The README covers installing the gate and the profiles.</p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>Limitations</h2>
+      <ul>
+        <li>The network is shared with Codex. The sandbox limits what Codex can read; anything inside the bound root can still be sent anywhere the machine can reach.</li>
+        <li>Masking matches file names when Codex starts. Secrets under other names, files created later and symbolic links are not masked.</li>
+        <li>The calling shell's environment passes into the namespace, except <code>WSL_INTEROP</code>, <code>WSLENV</code> and <code>unsetenv</code> entries.</li>
+        <li>After the last review round, Claude may stop with blockers still open. They are logged in <code>.ai/reports/qa_decisions.jsonl</code>.</li>
+        <li>The gate reviews uncommitted changes only.</li>
+        <li>Profile tokens travel as an environment variable readable by the same user's processes.</li>
+        <li>The CI workflow has not run yet; the counts above come from a local run on WSL2.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    agent-controls. Apache-2.0. Figures generated from <code>docs/data.json</code> at <code>b42826c</code>.
+  </footer>
+
+  <script src="charts.js" defer></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
+    const dark = document.documentElement.dataset.theme === "dark" ||
+      (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+    mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral",
+      fontFamily: "IBM Plex Sans, system-ui, sans-serif", securityLevel: "strict" });
+  </script>
+</body>
+</html>
