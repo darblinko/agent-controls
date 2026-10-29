@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "repo": "agent-controls",
+    "revision": "b42826c",
+    "measured": "2026-10-28"
+  },
+  "charts": [
+    {
+      "name": "hero",
+      "type": "stats",
+      "title": "agent-controls at a glance",
+      "subtitle": "Test counts from the suite; limits are the defaults in the gate script",
+      "source": "uvx pytest --collect-only -q; hooks/codex-review-gate.sh",
+      "alt": "66 tests of the three controls, 5 of them inside a real bubblewrap namespace; the review gate defaults to 2 rounds per batch and a 204,800 byte prompt.",
+      "tiles": [
+        {
+          "label": "Control tests",
+          "value": "66",
+          "note": "tests/, all passing"
+        },
+        {
+          "label": "Namespace runs",
+          "value": "5",
+          "note": "real bubblewrap"
+        },
+        {
+          "label": "Review rounds",
+          "value": "2",
+          "note": "gate default per batch"
+        },
+        {
+          "label": "Prompt cap, bytes",
+          "value": "204,800",
+          "note": "gate default"
+        }
+      ]
+    },
+    {
+      "name": "tests-per-control",
+      "type": "hbar",
+      "title": "Tests per control",
+      "subtitle": "pytest test count per group, all passing",
+      "source": "uvx pytest --collect-only -q",
+      "alt": "The review gate has 27 tests, codex-sandbox has 21 argument checks and 5 namespace runs, and claude_profile has 13 tests.",
+      "format": "number",
+      "data": [
+        {
+          "label": "review gate",
+          "value": 27
+        },
+        {
+          "label": "sandbox arguments",
+          "value": 21
+        },
+        {
+          "label": "claude_profile",
+          "value": 13
+        },
+        {
+          "label": "sandbox namespace runs",
+          "value": 5
+        }
+      ]
+    }
+  ]
+}
