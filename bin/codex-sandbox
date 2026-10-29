@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+# codex-sandbox: run the Codex CLI in a bubblewrap mount namespace that holds
+# only the configured working roots.
+#
+# Codex's `--sandbox read-only` policy restricts writes and leaves reads open.
+# A probe on 2026-08-30 showed Codex, started in read-only mode, read a file at
+# an arbitrary absolute path outside its --cd directory and list the root of an
+# unrelated repository. Project trust settings in config.toml govern approval
+# prompts; they do not set filesystem scope. This wrapper enforces the read
+# boundary with a mount namespace instead: a path that is not bound does not
+# exist for the child process.
+#
+# Inside the namespace:
+#   /usr, /bin, /sbin, /lib, /lib64 and /etc are read-only.
+#   /tmp, /home and $HOME are empty tmpfs mounts.
+#   The configured root that contains the current directory is bound
+#   read-write or read-only. A read-only root given with a subtree list binds
+#   only those subtrees, so .git is absent and `exec` gets
+#   --skip-git-repo-check.
+#   Every regular file under a bound root whose name matches .env* or a `mask`
+#   pattern is overmounted with /dev/null.
+#   /mnt is an empty tmpfs, and /init and /run are absent, so on WSL the
+#   Windows drives, the interop binfmt handler and the WSL_INTEROP socket are
+#   unreachable. WSL_INTEROP and WSLENV are unset.
+#   The network is shared, because the Codex API needs it.
+#
+# Settings (environment):
+#   CODEX_SANDBOX_CONFIG     config file, default
+#                            ${XDG_CONFIG_HOME:-$HOME/.config}/agent-controls/sandbox.conf
+#   CODEX_BIN                real Codex executable, default the first `codex`
+#                            on PATH that is not this script
+#   CODEX_UNCONFINED=1       run the real binary without the namespace
+#   CODEX_SANDBOX_DRY_RUN=1  print the bwrap command, one argument per line
+#
+# Config format: examples/sandbox.conf. Threat model: docs/threat-model.md.
+set -euo pipefail
+
+PRUNE_DIRS=(node_modules .git .venv venv __pycache__)
+SYSTEM_DIRS=(/usr /bin /sbin /lib /lib64 /etc)
+
+root_modes=()
+root_paths=()
+root_subtrees=()
+tool_paths=()
+state_paths=()
+masks=('.env*')
+env_args=()
+
+die() {
+  echo "codex-sandbox: $*" >&2
+  exit 1
+}
+
+warn() {
+  echo "codex-sandbox: $*" >&2
+}
+
+expand_home() {
+  local path=$1
+  if [[ $path == "~" ]]; then
+    path=$HOME
+  elif [[ $path == \~/* ]]; then
+    path="$HOME/${path#\~/}"
+  fi
+  printf '%s\n' "$path"
+}
+
+# Expand ~ and require an absolute path. Prints the expanded path.
+absolute_path() {
+  local line_no=$1 raw=$2 path
+  path=$(expand_home "$raw")
+  [[ $path == /* ]] || die "line $line_no: path must be absolute or start with ~/: $raw"
+  printf '%s\n' "$path"
+}
+
+add_root() {
+  local line_no=$1 mode=$2
+  [[ $# -ge 3 ]] || die "line $line_no: $mode needs a path"
+  local path subtree
+  path=$(absolute_path "$line_no" "$3")
+  shift 3
+  if [[ ! -d $path ]]; then
+    warn "line $line_no: $path is not a directory, skipped"
+    return 0
+  fi
+  path=$(readlink -f "$path")
+  [[ $path != / ]] || die "line $line_no: refusing / as a root"
+  [[ $mode == ro || $# -eq 0 ]] || die "line $line_no: subtrees are supported on ro roots only"
+  for subtree in "$@"; do
+    if [[ $subtree == /* || $subtree == *..* ]]; then
+      die "line $line_no: subtree must be relative and must not contain ..: $subtree"
+    fi
+  done
+  root_modes+=("$mode")
+  root_paths+=("$path")
+  root_subtrees+=("$*")
+}
+
+add_extra_path() {
+  local kind=$1 line_no=$2
+  [[ $# -eq 3 ]] || die "line $line_no: $kind takes exactly one path"
+  local path
+  path=$(absolute_path "$line_no" "$3")
+  if [[ $kind == state ]]; then
+    mkdir -p "$path"
+    state_paths+=("$(readlink -f "$path")")
+  elif [[ -e $path ]]; then
+    tool_paths+=("$path")
+  else
+    warn "line $line_no: $path does not exist, skipped"
+  fi
+}
+
+require_fields() {
+  local line_no=$1 keyword=$2 want=$3 got=$4
+  [[ $got -eq $want ]] || die "line $line_no: $keyword takes $((want - 1)) argument(s)"
+}
+
+parse_line() {
+  local line_no=$1
+  shift
+  local keyword=$1
+  case $keyword in
+    rw | ro) add_root "$line_no" "$@" ;;
+    tool | state) add_extra_path "$keyword" "$line_no" "${@:2}" ;;
+    setenv)
+      require_fields "$line_no" setenv 3 $#
+      env_args+=(--setenv "$2" "$(expand_home "$3")")
+      ;;
+    unsetenv)
+      require_fields "$line_no" unsetenv 2 $#
+      env_args+=(--unsetenv "$2")
+      ;;
+    mask)
+      require_fields "$line_no" mask 2 $#
+      masks+=("$2")
+      ;;
+    *) die "line $line_no: unknown keyword: $keyword" ;;
+  esac
+}
+
+load_config() {
+  local file=$1 line_no=0 line
+  local -a fields
+  [[ -f $file ]] || die "config not found: $file (start from examples/sandbox.conf)"
+  while IFS= read -r line || [[ -n $line ]]; do
+    line_no=$((line_no + 1))
+    line=${line%%#*}
+    read -r -a fields <<<"$line"
+    [[ ${#fields[@]} -gt 0 ]] || continue
+    parse_line "$line_no" "${fields[@]}"
+  done <"$file"
+  [[ ${#root_paths[@]} -gt 0 ]] || die "no usable rw or ro root in $file"
+}
+
+# Print the index of the longest configured root that contains $1, or -1.
+find_root() {
+  local cwd=$1 best=-1 best_len=0 i root
+  for i in "${!root_paths[@]}"; do
+    root=${root_paths[i]}
+    if [[ $cwd == "$root" || $cwd == "$root"/* ]] && ((${#root} > best_len)); then
+      best=$i
+      best_len=${#root}
+    fi
+  done
+  printf '%s\n' "$best"
+}
+
+path_is_under() {
+  local path=$1 base
+  shift
+  for base in "$@"; do
+    [[ $path == "$base" || $path == "$base"/* ]] && return 0
+  done
+  return 1
+}
+
+resolve_codex_bin() {
+  if [[ -n ${CODEX_BIN:-} ]]; then
+    printf '%s\n' "$CODEX_BIN"
+    return 0
+  fi
+  local self candidate
+  self=$(readlink -f "${BASH_SOURCE[0]}")
+  while IFS= read -r candidate; do
+    [[ $(readlink -f "$candidate") == "$self" ]] && continue
+    printf '%s\n' "$candidate"
+    return 0
+  done < <(type -ap codex)
+  die "no codex executable found on PATH; set CODEX_BIN"
+}
+
+# Emit NUL-separated --ro-bind /dev/null <file> triples for masked files.
+mask_args() {
+  local -a name_expr=() prune_expr=()
+  local pattern dir file
+  for pattern in "${masks[@]}"; do
+    name_expr+=(-o -name "$pattern")
+  done
+  for dir in "${PRUNE_DIRS[@]}"; do
+    prune_expr+=(-o -name "$dir")
+  done
+  for dir in "$@"; do
+    [[ -d $dir ]] || continue
+    while IFS= read -r -d '' file; do
+      printf '%s\0' --ro-bind /dev/null "$file"
+    done < <(find "$dir" \( "${prune_expr[@]:1}" \) -prune -o -type f \( "${name_expr[@]:1}" \) -print0)
+  done
+}
+
+base_args() {
+  local resolv dir
+  bwrap_args=(--ro-bind /usr /usr)
+  for dir in /bin /sbin /lib /lib64; do
+    bwrap_args+=(--ro-bind-try "$dir" "$dir")
+  done
+  bwrap_args+=(--ro-bind /etc /etc --tmpfs /mnt)
+  # /etc/resolv.conf is often a symlink into /mnt/wsl or /run; bind its target
+  # alone so DNS works while the rest of /mnt and /run stays absent.
+  resolv=$(readlink -f /etc/resolv.conf 2>/dev/null || true)
+  if [[ -n $resolv && $resolv != /etc/* ]]; then
+    bwrap_args+=(--ro-bind-try "$resolv" "$resolv")
+  fi
+  bwrap_args+=(--proc /proc --dev /dev --tmpfs /tmp --tmpfs /home --tmpfs "$HOME")
+}
+
+# Append the binds for root index $1. Sets bound_dirs and partial_root.
+root_args() {
+  local index=$1 cwd=$2 root=${root_paths[$1]} mode=${root_modes[$1]} subtree
+  local -a subtrees
+  read -r -a subtrees <<<"${root_subtrees[index]}"
+  bound_dirs=()
+  partial_root=0
+  if [[ ${#subtrees[@]} -eq 0 ]]; then
+    bound_dirs=("$root")
+    if [[ $mode == rw ]]; then
+      bwrap_args+=(--bind "$root" "$root")
+    else
+      bwrap_args+=(--ro-bind "$root" "$root")
+    fi
+    return 0
+  fi
+  partial_root=1
+  for subtree in "${subtrees[@]}"; do
+    [[ -e $root/$subtree ]] || continue
+    bound_dirs+=("$root/$subtree")
+    bwrap_args+=(--ro-bind "$root/$subtree" "$root/$subtree")
+  done
+  [[ ${#bound_dirs[@]} -gt 0 ]] || die "none of the subtrees of $root exist: ${subtrees[*]}"
+  if [[ $cwd != "$root" ]] && ! path_is_under "$cwd" "${bound_dirs[@]}"; then
+    die "$cwd is inside $root but outside its bound subtrees: ${subtrees[*]}"
+  fi
+}
+
+main() {
+  : "${HOME:?HOME must be set}"
+  local config=${CODEX_SANDBOX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agent-controls/sandbox.conf}
+  local codex_bin cwd index path
+  codex_bin=$(resolve_codex_bin)
+  if [[ ${CODEX_UNCONFINED:-} == 1 ]]; then
+    exec "$codex_bin" "$@"
+  fi
+  load_config "$config"
+  cwd=$(pwd -P)
+  index=$(find_root "$cwd")
+  if [[ $index -lt 0 ]]; then
+    die "$cwd is outside every configured root (${root_paths[*]}); cd into one, or set CODEX_UNCONFINED=1 to bypass"
+  fi
+  base_args
+  for path in "${tool_paths[@]}"; do bwrap_args+=(--ro-bind "$path" "$path"); done
+  for path in "${state_paths[@]}"; do bwrap_args+=(--bind "$path" "$path"); done
+  root_args "$index" "$cwd"
+  local -a masked=()
+  mapfile -d '' -t masked < <(mask_args "${bound_dirs[@]}")
+  bwrap_args+=("${masked[@]}")
+  local visible=("${SYSTEM_DIRS[@]}" "${tool_paths[@]}" "${state_paths[@]}" "${bound_dirs[@]}")
+  if ! path_is_under "$codex_bin" "${visible[@]}" || ! path_is_under "$(readlink -f "$codex_bin")" "${visible[@]}"; then
+    die "$codex_bin is not inside any bound path; add a tool line for its install directory"
+  fi
+  if [[ $partial_root == 1 && ${1:-} == exec ]]; then
+    set -- exec --skip-git-repo-check "${@:2}"
+  fi
+  bwrap_args+=("${env_args[@]}" --unsetenv WSL_INTEROP --unsetenv WSLENV)
+  bwrap_args+=(--unshare-all --share-net --die-with-parent --chdir "$cwd" "$codex_bin" "$@")
+  if [[ ${CODEX_SANDBOX_DRY_RUN:-} == 1 ]]; then
+    printf '%s\n' bwrap "${bwrap_args[@]}"
+    exit 0
+  fi
+  exec bwrap "${bwrap_args[@]}"
+}
+
+main "$@"

@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["APPROVED", "CHANGES_REQUESTED"]
+    },
+    "round": {
+      "type": "integer",
+      "description": "Informational: the review round number as seen by Codex"
+    },
+    "blocking_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2"]
+          },
+          "file": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "recommended_fix": {
+            "type": "string"
+          }
+        },
+        "required": ["severity", "file", "issue", "recommended_fix"]
+      }
+    },
+    "non_blocking_suggestions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": ["status", "round", "blocking_issues", "non_blocking_suggestions", "summary"]
+}
+

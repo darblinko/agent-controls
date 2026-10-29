@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REVIEW_GATE_TEST_CMD='uv run pytest -q' \"$CLAUDE_PROJECT_DIR\"/hooks/codex-review-gate.sh",
+            "timeout": 1200
+          }
+        ]
+      }
+    ]
+  }
+}
