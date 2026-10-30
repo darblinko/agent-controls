@@ -302,6 +302,20 @@ def test_reviewer_failure_does_not_use_a_round(project):
     assert "round 1 of 2" in project.run(CHANGES).stderr
 
 
+def test_unparseable_review_keeps_the_previous_blockers(project):
+    project.edit()
+    assert project.run(CHANGES).returncode == 2
+    project.edit(text="def total():\n    return 4\n")
+    failed = project.run("this is not json")
+    assert failed.returncode == 1
+    assert "this is not json" in failed.stderr
+    assert project.run(CHANGES).returncode == 0
+    third_prompt = project.prompt(3)
+    assert BLOCKER["issue"] in third_prompt
+    assert "this is not json" not in third_prompt
+    assert project.decisions()[1]["codex_review"] == {"_raw": "this is not json"}
+
+
 def test_approved_verdict_with_blockers_counts_as_changes_requested(project):
     project.edit()
     result = project.run(review("APPROVED", [BLOCKER]))

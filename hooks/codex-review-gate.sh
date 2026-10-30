@@ -38,6 +38,8 @@ FENCE='```'
 ROUND=0
 PROMPT_BYTES=0
 CURRENT_STATE=""
+VERDICT_STATUS=""
+VERDICT_BLOCKING=0
 
 setup_paths() {
   local start=${CLAUDE_PROJECT_DIR:-$PWD}
@@ -72,11 +74,11 @@ log_event() {
 }
 
 log_decision() {
-  local outcome=$1 reason=$2
+  local outcome=$1 reason=$2 review=${3:-$REVIEW_FILE}
   python3 "$HELPER" decision "$(date -Iseconds)" \
     "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)" \
     "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
-    "$ROUND" "$outcome" "$PROMPT_BYTES" "$reason" "$REVIEW_FILE" "$SUMMARY_FILE" >>"$DECISION_LOG"
+    "$ROUND" "$outcome" "$PROMPT_BYTES" "$reason" "$review" "$SUMMARY_FILE" >>"$DECISION_LOG"
 }
 
 check_setup() {
@@ -327,6 +329,16 @@ run_codex() {
     echo "codex-review-gate: Codex wrote no review to $new_review; no approval was recorded." >&2
     exit 1
   fi
+  read -r VERDICT_STATUS VERDICT_BLOCKING < <(python3 "$HELPER" verdict "$new_review") || true
+  # An unparseable review must not replace the last valid one, which the next
+  # fix-verification round needs.
+  if [[ $VERDICT_STATUS != APPROVED && $VERDICT_STATUS != CHANGES_REQUESTED ]]; then
+    log_event PARSE_ERROR "status=${VERDICT_STATUS:-none}"
+    log_decision PARSE_ERROR "unparseable review" "$new_review"
+    echo "codex-review-gate: could not parse the Codex review; no approval was recorded." >&2
+    cat "$new_review" >&2
+    exit 1
+  fi
   mv -f "$new_review" "$REVIEW_FILE"
   log_event CODEX_COMPLETE
 }
@@ -358,8 +370,7 @@ write_approval() {
 }
 
 route_verdict() {
-  local status blocking
-  read -r status blocking < <(python3 "$HELPER" verdict "$REVIEW_FILE") || true
+  local status=$VERDICT_STATUS blocking=$VERDICT_BLOCKING
   case $status in
     APPROVED)
       write_approval false
@@ -383,13 +394,6 @@ route_verdict() {
       echo "Codex requested changes (round $ROUND of $MAX_ROUNDS). Fix these, then stop again:" >&2
       cat "$REVIEW_FILE" >&2
       exit 2
-      ;;
-    *)
-      log_event PARSE_ERROR "status=$status"
-      log_decision PARSE_ERROR "unparseable review"
-      echo "codex-review-gate: could not parse the Codex review; no approval was recorded." >&2
-      cat "$REVIEW_FILE" >&2
-      exit 1
       ;;
   esac
 }
