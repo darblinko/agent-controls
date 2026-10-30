@@ -11,8 +11,12 @@
 # Exit 0: Claude may stop.
 # Exit 2: Claude must act on stderr (failed tests or requested changes).
 # Exit 1: the gate could not run (setup error, Codex failure, unparseable
-#         review). Claude Code shows stderr to the user and does not block, so
-#         a broken reviewer cannot hold Claude in a loop. No approval is written.
+#         review, files changed during the tests or the review). Claude Code
+#         shows stderr to the user and does not block, so a broken reviewer
+#         cannot hold Claude in a loop. No approval is written.
+#
+# The working state is hashed before the tests run. An approval records that
+# hash, and only when the state is unchanged after the review.
 #
 # Settings (environment):
 #   REVIEW_GATE_DISABLE=1           pass through; so does the file <reports>/disabled
@@ -327,9 +331,21 @@ run_codex() {
   log_event CODEX_COMPLETE
 }
 
+# Exit 1 without an approval when the working state differs from the one
+# hashed before the tests ran, because Codex saw some other state.
+require_reviewed_state() {
+  local reviewed=$CURRENT_STATE
+  read_current_state
+  [[ $CURRENT_STATE == "$reviewed" ]] && return 0
+  log_event STATE_CHANGED "files changed during the tests or the review"
+  log_decision STATE_CHANGED "files changed during the review; no approval recorded"
+  echo "codex-review-gate: files changed while Codex reviewed them; no approval was recorded. The next stop reviews the current state." >&2
+  exit 1
+}
+
 write_approval() {
   local auto=$1 reason=${2:-}
-  read_current_state
+  require_reviewed_state
   {
     echo "approved_at=$(date -Iseconds)"
     echo "approved_commit=$(git rev-parse HEAD)"

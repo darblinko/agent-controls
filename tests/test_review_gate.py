@@ -19,14 +19,17 @@ REPO = Path(__file__).resolve().parents[1]
 GATE = REPO / "hooks" / "codex-review-gate.sh"
 FAKE_CODEX = """#!/usr/bin/env bash
 set -euo pipefail
+echo call >> "$FAKE_STATE/invocations"
+calls=$(wc -l < "$FAKE_STATE/invocations")
+printf '%s\\n' "$@" > "$FAKE_STATE/args-$calls"
 out=""
 while [[ $# -gt 0 ]]; do
   if [[ $1 == --output-last-message ]]; then out=$2; shift; fi
   shift
 done
-calls=$(( $(cat "$FAKE_STATE/calls" 2>/dev/null || echo 0) + 1 ))
-echo "$calls" > "$FAKE_STATE/calls"
 cat > "$FAKE_STATE/prompt-$calls.md"
+if [[ -n ${FAKE_SLEEP:-} ]]; then sleep "$FAKE_SLEEP"; fi
+if [[ -n ${FAKE_EDIT:-} ]]; then echo "# edited during the review" >> "$FAKE_EDIT"; fi
 if [[ ${FAKE_CODEX_EXIT:-0} != 0 ]]; then echo "stub failure" >&2; exit "$FAKE_CODEX_EXIT"; fi
 if [[ -n ${FAKE_NO_OUTPUT:-} ]]; then exit 0; fi
 cp "$FAKE_STATE/verdict.json" "$out"
@@ -88,8 +91,11 @@ class Project:
         )
 
     def calls(self) -> int:
-        path = self.state / "calls"
-        return int(path.read_text()) if path.exists() else 0
+        path = self.state / "invocations"
+        return len(path.read_text().splitlines()) if path.exists() else 0
+
+    def args(self, number: int) -> list[str]:
+        return (self.state / f"args-{number}").read_text().splitlines()
 
     def prompt(self, number: int) -> str:
         return (self.state / f"prompt-{number}.md").read_text()
@@ -188,6 +194,17 @@ def test_binary_edit_triggers_a_new_review(project):
     (project.root / "data.bin").write_bytes(b"\x00second")
     assert project.run(APPROVED).returncode == 0
     (project.root / "data.bin").write_bytes(b"\x00third")
+    project.run(APPROVED)
+    assert project.calls() == 2
+
+
+@pytest.mark.parametrize("verdict", [APPROVED, CHANGES], ids=["approved", "auto-approved"])
+def test_edit_during_the_review_is_not_approved(project, verdict):
+    project.edit()
+    result = project.run(verdict, FAKE_EDIT=str(project.root / "app.py"), REVIEW_GATE_MAX_ROUNDS="1")
+    assert result.returncode == 1
+    assert "files changed while Codex reviewed them" in result.stderr
+    assert not (project.reports / "codex_approved").exists()
     project.run(APPROVED)
     assert project.calls() == 2
 
