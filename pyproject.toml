@@ -16,3 +16,8 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Chart generator copied from shared tooling; long SVG f-strings and short
+# scale lambdas are kept as written there.
+"tools/svgchart.py" = ["E501", "E731", "B905"]

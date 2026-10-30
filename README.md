@@ -176,6 +176,7 @@ templates/                     reviewer prompt and review JSON schema for .ai/
 examples/                      sandbox.conf, Stop hook settings, /review-gate command
 docs/threat-model.md           threats, mechanisms, gaps, tests
 docs/data.json, docs/figures/  figure data and the SVGs generated from it
+tools/svgchart.py              SVG generator for docs/figures, standard library only
 docs/index.html                landing page for GitHub Pages, charts from docs/data.json
 tests/                         pytest suite that drives the scripts
 ```
@@ -195,6 +196,41 @@ tests/                         pytest suite that drives the scripts
 - A reviewer failure exits 1, which Claude Code reports to the user without blocking. A gate that blocked on its own failures could hold Claude in a loop it cannot resolve.
 - The gate is disabled with a marker file, `.ai/reports/disabled`, because an environment variable exported from a Claude Code Bash tool call does not reach the hook process.
 - Profile tokens travel as an environment variable and are readable by the same user's processes. See [docs/threat-model.md](docs/threat-model.md).
+
+## Figures
+
+The README charts and the landing page charts are generated from one file, [docs/data.json](docs/data.json). Every number in it is copied or computed from a file or command in this repository, and each chart's `source` field names it. To regenerate the SVGs after a data change:
+
+```bash
+python3 tools/svgchart.py docs/data.json docs/figures
+```
+
+[tools/svgchart.py](tools/svgchart.py) uses the Python standard library only. It writes `docs/figures/<name>-light.svg` and `<name>-dark.svg` for every chart and prints a Markdown snippet per chart: a `<picture>` element, which lets GitHub pick the variant for the viewer's theme, and a collapsed data table. The snippets are pasted into this README under the matching `<!-- chart: <name> -->` comment. [docs/charts.js](docs/charts.js) renders the same data on the landing page.
+
+### docs/data.json schema
+
+```json
+{
+  "meta": {"repo": "agent-controls", "revision": "<commit>", "measured": "<YYYY-MM-DD>"},
+  "charts": [
+    {"name": "tests-per-control", "type": "hbar", "title": "Tests per control",
+     "subtitle": "pytest test count per group", "source": "uvx pytest --collect-only -q",
+     "alt": "Text alternative for the chart.", "format": "number",
+     "data": [{"label": "review gate", "value": 28}]}
+  ]
+}
+```
+
+Every chart has `name` (used in the SVG file names and in `data-chart` on the landing page), `type`, `title`, `subtitle`, `source` and `alt`. The fields per type:
+
+| type | Required fields | Use |
+|---|---|---|
+| hbar | data: [{label, value, status?, note?}]; optional max, threshold {value, label} | Per-item comparisons. status is "pass" or "fail" and prints as text beside the bar. |
+| columns | categories: [...], series: [{name, values}] (1 to 4 series) | Counts per category |
+| line | x: [...], series: [{name, values}] (1 to 4 series; null for a gap; the last value must be a number); optional min, max | Change over runs or time |
+| stats | tiles: [{label, value (preformatted string), note?}] | Headline figures, at most 4 tiles per row |
+
+`format` is one of `percent` (values are fractions, 0.86 prints as 86%), `number` (the default, 2,909), `decimal2` or `decimal3`. Each chart has one y-axis and at most 4 series.
 
 ## License
 

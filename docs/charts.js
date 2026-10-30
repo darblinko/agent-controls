@@ -1,6 +1,6 @@
 // Renders every <figure class="chart" data-chart="name"> from the page's chart data.
 // Data comes from <script type="application/json" id="chart-data"> when present,
-// otherwise from data.json next to the page. Schema: publish-kit README.md.
+// otherwise from data.json next to the page. Schema: README.md, section "Figures".
 (function () {
   "use strict";
 
