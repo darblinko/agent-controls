@@ -169,6 +169,29 @@ def test_edit_after_approval_triggers_a_new_review(project):
     assert project.calls() == 2
 
 
+def test_new_staged_content_behind_the_same_worktree_triggers_a_new_review(project):
+    project.edit(text="def total():\n    return 2\n")
+    git(project.root, "add", "app.py")
+    project.edit(text="def total():\n    return 3\n")
+    assert project.run(APPROVED).returncode == 0
+    project.edit(text="def total():\n    return 4\n")
+    git(project.root, "add", "app.py")
+    project.edit(text="def total():\n    return 3\n")
+    project.run(APPROVED)
+    assert project.calls() == 2
+
+
+def test_binary_edit_triggers_a_new_review(project):
+    (project.root / "data.bin").write_bytes(b"\x00first")
+    git(project.root, "add", "data.bin")
+    git(project.root, "commit", "-q", "-m", "binary")
+    (project.root / "data.bin").write_bytes(b"\x00second")
+    assert project.run(APPROVED).returncode == 0
+    (project.root / "data.bin").write_bytes(b"\x00third")
+    project.run(APPROVED)
+    assert project.calls() == 2
+
+
 def test_changes_requested_blocks_with_the_review_on_stderr(project):
     project.edit()
     result = project.run(CHANGES)

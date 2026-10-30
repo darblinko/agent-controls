@@ -76,7 +76,7 @@ flowchart TD
   fix --> stop
 ```
 
-Round 1 is a full review. Later rounds verify only the fixes for the previous round's blockers. A round counts only when Codex returns a verdict, so a test failure or a Codex outage does not use one. A change to the `git status --short` output starts a new batch at round 1. A new changed file does this, and so does `git add` with no content change, because each status line carries the file's two status letters. The approval records a hash of HEAD, the status, the diff and the untracked file contents, so any later edit triggers a new review. Codex's prompt is assembled from `templates/codex_reviewer.md`, the diffs, the untracked files and the test output, capped at 204800 bytes (`REVIEW_GATE_MAX_PROMPT_BYTES` default in `hooks/codex-review-gate.sh`).
+Round 1 is a full review. Later rounds verify only the fixes for the previous round's blockers. A round counts only when Codex returns a verdict, so a test failure or a Codex outage does not use one. A change to the `git status --short` output starts a new batch at round 1. A new changed file does this, and so does `git add` with no content change, because each status line carries the file's two status letters. The approval records a hash of HEAD, the status, the index entries, the unstaged diff and the untracked file contents, so any later edit or staging change triggers a new review. Codex's prompt is assembled from `templates/codex_reviewer.md`, the diffs, the untracked files and the test output, capped at 204800 bytes (`REVIEW_GATE_MAX_PROMPT_BYTES` default in `hooks/codex-review-gate.sh`).
 
 ### claude_profile
 

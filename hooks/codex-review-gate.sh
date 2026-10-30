@@ -130,14 +130,17 @@ untracked_state() {
   done < <(untracked_paths)
 }
 
-# Hash of HEAD, the status, the diff against HEAD and every untracked file.
+# Hash of HEAD, the status, every index entry, the worktree diff against the
+# index and every untracked file. Staged and unstaged content are hashed
+# separately, because a diff against HEAD cannot tell them apart.
 working_state_hash() {
   local listing digest
   listing=$(mktemp) || return 1
   if ! {
     git rev-parse HEAD &&
       project_changes &&
-      git diff HEAD -- . "$EXCLUDE" &&
+      git ls-files --stage -- . "$EXCLUDE" &&
+      git diff --binary -- . "$EXCLUDE" &&
       untracked_state
   } >"$listing"; then
     rm -f "$listing"
