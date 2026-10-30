@@ -12,6 +12,8 @@ FAKE_CLAUDE = """#!/usr/bin/env bash
 echo "config=${CLAUDE_CONFIG_DIR-unset}"
 echo "token=${CLAUDE_CODE_OAUTH_TOKEN-unset}"
 echo "gh=${GH_CONFIG_DIR-unset}"
+echo "api_key=${ANTHROPIC_API_KEY-unset}"
+echo "auth_token=${ANTHROPIC_AUTH_TOKEN-unset}"
 echo "args=$*"
 """
 
@@ -77,6 +79,34 @@ def test_empty_token_file_is_ignored(shell_env):
 def test_other_profiles_tokens_are_not_used(shell_env):
     write_token(Path(shell_env["HOME"]) / ".config" / "claude-tokens", "personal", "fake-token-4")
     assert parsed(run_profile(shell_env, "work"))["token"] == "unset"
+
+
+INHERITED_CREDENTIALS = {
+    "CLAUDE_CODE_OAUTH_TOKEN": "personal-token",
+    "ANTHROPIC_API_KEY": "personal-key",
+    "ANTHROPIC_AUTH_TOKEN": "personal-auth",
+}
+
+
+@pytest.mark.parametrize("has_token_file", [False, True], ids=["no-token-file", "token-file"])
+def test_inherited_credentials_do_not_reach_another_profile(shell_env, has_token_file):
+    if has_token_file:
+        write_token(Path(shell_env["HOME"]) / ".config" / "claude-tokens", "work", "fake-token-5")
+    out = parsed(run_profile({**shell_env, **INHERITED_CREDENTIALS}, "work"))
+    assert out["token"] == ("fake-token-5" if has_token_file else "unset")
+    assert out["api_key"] == "unset"
+    assert out["auth_token"] == "unset"
+
+
+def test_profile_run_leaves_the_calling_shell_environment_unchanged(shell_env):
+    script = f'. "{PROFILES}"; claude_profile work >/dev/null; echo "$CLAUDE_CODE_OAUTH_TOKEN"'
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={**shell_env, **INHERITED_CREDENTIALS},
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "personal-token"
 
 
 def test_prefix_assignments_reach_claude(shell_env):

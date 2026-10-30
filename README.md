@@ -80,7 +80,7 @@ Round 1 is a full review. Later rounds verify only the fixes for the previous ro
 
 ### claude_profile
 
-`claude_profile work` runs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-work`. If `~/.config/claude-tokens/work` exists and is non-empty, its contents become `CLAUDE_CODE_OAUTH_TOKEN` for that run. Settings, permissions, hooks, plugins, memory and transcripts stay per profile. A `GH_CONFIG_DIR=...` prefix on an alias pairs a profile with a GitHub CLI identity.
+`claude_profile work` runs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-work`. If `~/.config/claude-tokens/work` exists and is non-empty, its contents become `CLAUDE_CODE_OAUTH_TOKEN` for that run. `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` inherited from the calling shell are removed for the run, so a profile without a token file does not sign in with another account's token. Settings, permissions, hooks, plugins, memory and transcripts stay per profile. A `GH_CONFIG_DIR=...` prefix on an alias pairs a profile with a GitHub CLI identity.
 
 ## Verification
 

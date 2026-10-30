@@ -111,7 +111,7 @@ Design rationale (inference, not measured): without a cap, a reviewer that raise
 | Threat | Mechanism | Test in tests/test_claude_profiles.py |
 |---|---|---|
 | T6: shared settings, memory, permissions and transcripts | Each profile gets its own `CLAUDE_CONFIG_DIR` (`~/.claude-<name>`). | test_profile_selects_its_config_dir_and_passes_arguments |
-| T6: the wrong account | Each profile can carry its own long-lived OAuth token in `CLAUDE_TOKEN_DIR/<name>`. A profile never reads another profile's token file. | test_token_file_is_loaded_from_the_default_directory, test_other_profiles_tokens_are_not_used |
+| T6: the wrong account | Each profile can carry its own long-lived OAuth token in `CLAUDE_TOKEN_DIR/<name>`. A profile never reads another profile's token file. `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` inherited from the calling shell are removed for the run. | test_token_file_is_loaded_from_the_default_directory, test_other_profiles_tokens_are_not_used, test_inherited_credentials_do_not_reach_another_profile |
 | A profile name that points elsewhere | Names are restricted to letters, digits, dot, dash and underscore, starting with a letter or digit. | test_unsafe_profile_names_are_refused |
 | T6: the wrong GitHub identity | A `GH_CONFIG_DIR=...` prefix on the alias reaches `claude` and the `gh` commands it runs. | test_prefix_assignments_reach_claude |
 
