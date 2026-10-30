@@ -114,7 +114,7 @@ The namespace tests are skipped where bubblewrap cannot create a namespace. CI i
 
 ## Quickstart
 
-Requirements: bash 4.4 or later, git, Python 3.10 or later, [uv](https://docs.astral.sh/uv/), and bubblewrap (`apt install bubblewrap`) for the sandbox.
+Requirements: bash 4.4 or later, git, Python 3.10 or later, [uv](https://docs.astral.sh/uv/), `flock` from util-linux for the review gate, and bubblewrap (`apt install bubblewrap`) for the sandbox.
 
 ```bash
 git clone https://github.com/darblinko/agent-controls

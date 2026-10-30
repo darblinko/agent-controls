@@ -99,7 +99,36 @@ is_disabled() {
   [[ ${REVIEW_GATE_DISABLE:-0} == 1 || -f $REPORT_DIR/disabled ]]
 }
 
+# Run "$@" while holding an exclusive flock on the guard file, so that the
+# check and the update of the lock file are one atomic step across processes.
+# The guard is released before the tests and the review run.
+with_guard() {
+  local guard_fd status=0
+  exec {guard_fd}>>"$LOCK_FILE.guard"
+  if ! flock -w 30 "$guard_fd"; then
+    exec {guard_fd}>&-
+    echo "codex-review-gate: could not lock $LOCK_FILE.guard within 30 s." >&2
+    exit 1
+  fi
+  "$@" || status=$?
+  exec {guard_fd}>&-
+  return "$status"
+}
+
 acquire_lock() {
+  with_guard take_lock
+  trap 'with_guard release_lock' EXIT
+}
+
+# Remove the lock only while it is still this process's; a stale takeover by
+# a later stop replaces it with that stop's pid.
+release_lock() {
+  if [[ -f $LOCK_FILE && $(sed -n 1p "$LOCK_FILE") == "$$" ]]; then
+    rm -f "$LOCK_FILE"
+  fi
+}
+
+take_lock() {
   local stale=${REVIEW_GATE_LOCK_STALE_SECONDS:-1500} lock_pid lock_time elapsed
   if [[ -f $LOCK_FILE ]]; then
     lock_pid=$(sed -n 1p "$LOCK_FILE")
@@ -114,7 +143,6 @@ acquire_lock() {
     rm -f "$LOCK_FILE"
   fi
   printf '%s\n%s\n' "$$" "$(date +%s)" >"$LOCK_FILE"
-  trap 'rm -f "$LOCK_FILE"' EXIT
 }
 
 project_changes() {

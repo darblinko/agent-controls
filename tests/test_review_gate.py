@@ -30,6 +30,7 @@ done
 cat > "$FAKE_STATE/prompt-$calls.md"
 if [[ -n ${FAKE_SLEEP:-} ]]; then sleep "$FAKE_SLEEP"; fi
 if [[ -n ${FAKE_EDIT:-} ]]; then echo "# edited during the review" >> "$FAKE_EDIT"; fi
+if [[ -n ${FAKE_TAKEOVER:-} ]]; then printf '1\\n%s\\n' "$(date +%s)" > "$FAKE_TAKEOVER"; fi
 if [[ ${FAKE_CODEX_EXIT:-0} != 0 ]]; then echo "stub failure" >&2; exit "$FAKE_CODEX_EXIT"; fi
 if [[ -n ${FAKE_NO_OUTPUT:-} ]]; then exit 0; fi
 cp "$FAKE_STATE/verdict.json" "$out"
@@ -75,7 +76,7 @@ class Project:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
 
-    def run(self, verdict: dict | str = APPROVED, **extra_env: str):
+    def env(self, verdict: dict | str, extra_env: dict) -> dict:
         text = verdict if isinstance(verdict, str) else json.dumps(verdict)
         (self.state / "verdict.json").write_text(text)
         env = {
@@ -86,8 +87,25 @@ class Project:
             "FAKE_STATE": str(self.state),
         }
         env.update(extra_env)
+        return env
+
+    def run(self, verdict: dict | str = APPROVED, **extra_env: str):
         return subprocess.run(
-            ["bash", str(GATE)], cwd=self.root, env=env, capture_output=True, text=True
+            ["bash", str(GATE)],
+            cwd=self.root,
+            env=self.env(verdict, extra_env),
+            capture_output=True,
+            text=True,
+        )
+
+    def start(self, verdict: dict | str = APPROVED, **extra_env: str) -> subprocess.Popen:
+        return subprocess.Popen(
+            ["bash", str(GATE)],
+            cwd=self.root,
+            env=self.env(verdict, extra_env),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
 
     def calls(self) -> int:
@@ -320,6 +338,24 @@ def test_approved_verdict_with_blockers_counts_as_changes_requested(project):
     project.edit()
     result = project.run(review("APPROVED", [BLOCKER]))
     assert result.returncode == 2
+
+
+def test_simultaneous_stops_run_one_review(project):
+    project.edit()
+    project.reports.mkdir(parents=True)
+    stops = [project.start(APPROVED, FAKE_SLEEP="2") for _ in range(8)]
+    results = [stop.communicate(timeout=60) for stop in stops]
+    assert [stop.returncode for stop in stops] == [0] * 8, results
+    assert project.calls() == 1
+    assert not (project.reports / "codex_review_gate.lock").exists()
+
+
+def test_a_lock_taken_over_during_the_review_is_left_to_its_new_holder(project):
+    project.edit()
+    lock = project.reports / "codex_review_gate.lock"
+    result = project.run(APPROVED, FAKE_TAKEOVER=str(lock))
+    assert result.returncode == 0, result.stderr
+    assert lock.read_text().splitlines()[0] == "1"
 
 
 def test_live_lock_skips_the_review(project):
