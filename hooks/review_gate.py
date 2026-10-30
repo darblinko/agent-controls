@@ -3,7 +3,8 @@
 
 review_gate.py verdict <review_file>
     Print "<STATUS> <blocking_count>". STATUS is APPROVED, CHANGES_REQUESTED
-    or UNKNOWN. An APPROVED verdict that lists blocking issues is reported as
+    or UNKNOWN. A review that does not match templates/codex_review_schema.json
+    is UNKNOWN. An APPROVED verdict that lists blocking issues is reported as
     CHANGES_REQUESTED.
 
 review_gate.py decision <timestamp> <branch> <commit> <round> <outcome>
@@ -17,6 +18,11 @@ import sys
 from pathlib import Path
 
 VALID_STATUSES = {"APPROVED", "CHANGES_REQUESTED"}
+SEVERITIES = {"P0", "P1", "P2"}
+# Field sets of templates/codex_review_schema.json; every field is required and
+# no other field is allowed.
+REVIEW_FIELDS = ("status", "round", "blocking_issues", "non_blocking_suggestions", "summary")
+ISSUE_FIELDS = ("severity", "file", "issue", "recommended_fix")
 DISPUTE_HEADING = "## Disputed Issues"
 MAX_RAW_CHARS = 2000
 MAX_DISPUTE_CHARS = 3000
@@ -41,17 +47,39 @@ def load_review(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def valid_issue(issue: object) -> bool:
+    return (
+        isinstance(issue, dict)
+        and set(issue) == set(ISSUE_FIELDS)
+        and all(isinstance(issue[field], str) for field in ISSUE_FIELDS)
+        and issue["severity"] in SEVERITIES
+    )
+
+
+def valid_review(review: dict) -> bool:
+    """True when the review matches the schema in full."""
+    if set(review) != set(REVIEW_FIELDS):
+        return False
+    issues, suggestions = review["blocking_issues"], review["non_blocking_suggestions"]
+    return (
+        review["status"] in VALID_STATUSES
+        and isinstance(review["round"], int)
+        and not isinstance(review["round"], bool)
+        and isinstance(issues, list)
+        and all(valid_issue(issue) for issue in issues)
+        and isinstance(suggestions, list)
+        and all(isinstance(item, str) for item in suggestions)
+        and isinstance(review["summary"], str)
+    )
+
+
 def verdict(review: dict | None) -> tuple[str, int]:
-    if review is None:
+    if review is None or not valid_review(review):
         return "UNKNOWN", 0
-    issues = review.get("blocking_issues")
-    count = len(issues) if isinstance(issues, list) else 0
-    status = review.get("status")
-    if status not in VALID_STATUSES:
-        return "UNKNOWN", count
-    if status == "APPROVED" and count > 0:
+    count = len(review["blocking_issues"])
+    if review["status"] == "APPROVED" and count > 0:
         return "CHANGES_REQUESTED", count
-    return status, count
+    return review["status"], count
 
 
 def dispute_section(summary_path: Path) -> str | None:

@@ -201,7 +201,9 @@ def test_binary_edit_triggers_a_new_review(project):
 @pytest.mark.parametrize("verdict", [APPROVED, CHANGES], ids=["approved", "auto-approved"])
 def test_edit_during_the_review_is_not_approved(project, verdict):
     project.edit()
-    result = project.run(verdict, FAKE_EDIT=str(project.root / "app.py"), REVIEW_GATE_MAX_ROUNDS="1")
+    result = project.run(
+        verdict, FAKE_EDIT=str(project.root / "app.py"), REVIEW_GATE_MAX_ROUNDS="1"
+    )
     assert result.returncode == 1
     assert "files changed while Codex reviewed them" in result.stderr
     assert not (project.reports / "codex_approved").exists()
@@ -274,8 +276,17 @@ def test_test_output_is_included_in_the_prompt(project):
         ({"FAKE_NO_OUTPUT": "1"}, APPROVED),
         ({}, "this is not json"),
         ({}, {"status": "MAYBE", "blocking_issues": []}),
+        ({}, {"status": "APPROVED"}),
+        ({}, {**APPROVED, "blocking_issues": ["not an object"]}),
     ],
-    ids=["codex-fails", "no-review-file", "not-json", "unknown-status"],
+    ids=[
+        "codex-fails",
+        "no-review-file",
+        "not-json",
+        "unknown-status",
+        "status-only",
+        "string-blocker",
+    ],
 )
 def test_reviewer_failures_neither_block_nor_approve(project, env, verdict):
     project.edit()
@@ -436,3 +447,32 @@ def test_helper_rejects_non_object_json(tmp_path):
     path = tmp_path / "review.json"
     path.write_text("[1, 2]")
     assert helper.verdict(helper.load_review(path)) == ("UNKNOWN", 0)
+
+
+@pytest.mark.parametrize(
+    "review_data",
+    [
+        {"status": "APPROVED"},
+        {**APPROVED, "blocking_issues": ["not an object"]},
+        {**APPROVED, "blocking_issues": [{**BLOCKER, "severity": "P9"}]},
+        {**APPROVED, "blocking_issues": [{"severity": "P1", "file": "app.py"}]},
+        {**APPROVED, "blocking_issues": [{**BLOCKER, "extra": "x"}]},
+        {**APPROVED, "round": "1"},
+        {**APPROVED, "round": True},
+        {**APPROVED, "non_blocking_suggestions": [1]},
+        {**APPROVED, "summary": None},
+        {**APPROVED, "unexpected": 1},
+    ],
+)
+def test_helper_rejects_reviews_that_do_not_match_the_schema(review_data):
+    assert load_helper().verdict(review_data) == ("UNKNOWN", 0)
+
+
+def test_helper_schema_check_matches_the_template_schema():
+    schema = json.loads((REPO / "templates" / "codex_review_schema.json").read_text())
+    helper = load_helper()
+    issue_schema = schema["properties"]["blocking_issues"]["items"]
+    assert set(helper.REVIEW_FIELDS) == set(schema["required"]) == set(schema["properties"])
+    assert set(helper.ISSUE_FIELDS) == set(issue_schema["required"])
+    assert helper.SEVERITIES == set(issue_schema["properties"]["severity"]["enum"])
+    assert helper.VALID_STATUSES == set(schema["properties"]["status"]["enum"])
