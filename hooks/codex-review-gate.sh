@@ -33,6 +33,7 @@ MAX_UNTRACKED_FILE_BYTES=51200
 FENCE='```'
 ROUND=0
 PROMPT_BYTES=0
+CURRENT_STATE=""
 
 setup_paths() {
   local start=${CLAUDE_PROJECT_DIR:-$PWD}
@@ -114,24 +115,53 @@ project_changes() {
   git status --short --untracked-files=all -- . "$EXCLUDE"
 }
 
+# NUL-separated untracked paths, unquoted whatever their characters.
+untracked_paths() {
+  git ls-files -z --others --exclude-standard -- . "$EXCLUDE"
+}
+
+# One "<path> <blob id>" line per untracked file. Returns 1 if a file cannot
+# be hashed, so a failure cannot leave that file out of the state.
+untracked_state() {
+  local file digest
+  while IFS= read -r -d '' file; do
+    digest=$(git hash-object -- "$file") || return 1
+    printf '%s %s\n' "$file" "$digest"
+  done < <(untracked_paths)
+}
+
 # Hash of HEAD, the status, the diff against HEAD and every untracked file.
 working_state_hash() {
-  local file
-  {
-    git rev-parse HEAD
-    project_changes
-    git diff HEAD -- . "$EXCLUDE"
-    git ls-files --others --exclude-standard -- . "$EXCLUDE" | while IFS= read -r file; do
-      printf '%s %s\n' "$file" "$(git hash-object -- "$file")"
-    done
-  } | git hash-object --stdin
+  local listing digest
+  listing=$(mktemp) || return 1
+  if ! {
+    git rev-parse HEAD &&
+      project_changes &&
+      git diff HEAD -- . "$EXCLUDE" &&
+      untracked_state
+  } >"$listing"; then
+    rm -f "$listing"
+    return 1
+  fi
+  digest=$(git hash-object --stdin <"$listing") || digest=""
+  rm -f "$listing"
+  [[ -n $digest ]] && printf '%s\n' "$digest"
+}
+
+# Set CURRENT_STATE to the working state hash, or exit 1 when it cannot be computed.
+read_current_state() {
+  if ! CURRENT_STATE=$(working_state_hash); then
+    log_event HASH_ERROR "could not hash the working state"
+    echo "codex-review-gate: could not hash the working state; no approval was recorded." >&2
+    exit 1
+  fi
 }
 
 already_approved() {
   [[ -f $APPROVAL_FILE ]] || return 1
   local approved
   approved=$(sed -n 's/^approved_state=//p' "$APPROVAL_FILE")
-  if [[ -n $approved && $approved == "$(working_state_hash)" ]]; then
+  if [[ -n $approved && $approved == "$CURRENT_STATE" ]]; then
     return 0
   fi
   rm -f "$APPROVAL_FILE"
@@ -182,7 +212,7 @@ bounded_diff() {
 
 untracked_files_section() {
   local file size
-  git ls-files --others --exclude-standard -- . "$EXCLUDE" | while IFS= read -r file; do
+  while IFS= read -r -d '' file; do
     [[ -f $file ]] || continue
     printf '\n### %s\n' "$file"
     if [[ ${file,,} =~ $BINARY_EXT_PATTERN ]]; then
@@ -199,7 +229,7 @@ untracked_files_section() {
       git diff --no-index -- /dev/null "$file" || true
       echo "$FENCE"
     fi
-  done
+  done < <(untracked_paths)
 }
 
 round_section() {
@@ -287,10 +317,11 @@ run_codex() {
 
 write_approval() {
   local auto=$1 reason=${2:-}
+  read_current_state
   {
     echo "approved_at=$(date -Iseconds)"
     echo "approved_commit=$(git rev-parse HEAD)"
-    echo "approved_state=$(working_state_hash)"
+    echo "approved_state=$CURRENT_STATE"
     echo "rounds=$ROUND"
     echo "auto_approved=$auto"
     [[ -z $reason ]] || echo "override_reason=$reason"
@@ -348,6 +379,7 @@ main() {
     log_event HOOK_SKIP "no uncommitted changes"
     exit 0
   fi
+  read_current_state
   if already_approved; then
     log_event HOOK_SKIP "working state already approved"
     exit 0

@@ -304,6 +304,25 @@ def test_prompt_is_capped(project):
     assert "[TRUNCATED: prompt exceeded 4000 bytes]" in prompt
 
 
+def test_untracked_file_with_a_non_ascii_name_is_reviewed_and_hashed(project):
+    project.edit("café.py", "VALUE = 'first-marker'\n")
+    assert project.run(APPROVED).returncode == 0
+    assert "first-marker" in project.prompt(1)
+    project.edit("café.py", "VALUE = 'second-marker'\n")
+    project.run(APPROVED)
+    assert project.calls() == 2
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads files of any mode")
+def test_unhashable_untracked_file_stops_the_gate_without_approval(project):
+    project.edit("locked.txt", "x\n")
+    (project.root / "locked.txt").chmod(0)
+    result = project.run(APPROVED)
+    assert result.returncode == 1
+    assert "could not hash the working state" in result.stderr
+    assert project.calls() == 0
+
+
 def test_binary_untracked_files_are_not_inlined(project):
     project.edit("model.PKL", "binary-marker")
     project.run(APPROVED)
