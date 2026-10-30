@@ -1,0 +1,1 @@
+secret-assignment tests/test_claude_profiles.py placeholder credential values; the tests check that the profile function removes them
