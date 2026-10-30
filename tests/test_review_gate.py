@@ -361,12 +361,15 @@ def test_live_lock_is_taken_over_by_age_only_after_the_hook_timeout(project):
     assert not lock.exists()
 
 
-def test_prompt_is_capped(project):
-    project.edit("notes.txt", "line of text\n" * 2000)
-    project.run(APPROVED, REVIEW_GATE_MAX_PROMPT_BYTES="4000")
-    prompt = project.prompt(1)
-    assert len(prompt.encode()) < 4100
-    assert "[TRUNCATED: prompt exceeded 4000 bytes]" in prompt
+@pytest.mark.parametrize("cap", [None, 4000], ids=["default", "configured"])
+def test_prompt_never_exceeds_the_cap(project, cap):
+    limit = cap or 204800
+    env = {} if cap is None else {"REVIEW_GATE_MAX_PROMPT_BYTES": str(cap)}
+    project.edit(text="line of text\n" * 20000)
+    project.run(APPROVED, **env)
+    prompt = (project.state / "prompt-1.md").read_bytes()
+    assert len(prompt) <= limit
+    assert f"[TRUNCATED: prompt exceeded {limit} bytes]".encode() in prompt
 
 
 def test_untracked_file_with_a_non_ascii_name_is_reviewed_and_hashed(project):

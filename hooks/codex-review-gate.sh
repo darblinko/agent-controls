@@ -303,8 +303,14 @@ write_prompt() {
   PROMPT_BYTES=$(wc -c <"$PROMPT_FILE")
   if ((PROMPT_BYTES > MAX_PROMPT_BYTES)); then
     log_event PROMPT_TRUNCATED "original=${PROMPT_BYTES} bytes, cap=${MAX_PROMPT_BYTES}"
-    head -c "$MAX_PROMPT_BYTES" "$PROMPT_FILE" >"$PROMPT_FILE.tmp"
-    printf '\n\n[TRUNCATED: prompt exceeded %s bytes]\n' "$MAX_PROMPT_BYTES" >>"$PROMPT_FILE.tmp"
+    local notice keep
+    notice=$(printf '\n\n[TRUNCATED: prompt exceeded %s bytes]' "$MAX_PROMPT_BYTES")
+    # The notice and its newline count toward the cap. The notice is ASCII, so
+    # its length in characters is its length in bytes.
+    keep=$((MAX_PROMPT_BYTES - ${#notice} - 1))
+    ((keep >= 0)) || keep=0
+    head -c "$keep" "$PROMPT_FILE" >"$PROMPT_FILE.tmp"
+    printf '%s\n' "$notice" >>"$PROMPT_FILE.tmp"
     mv "$PROMPT_FILE.tmp" "$PROMPT_FILE"
     PROMPT_BYTES=$(wc -c <"$PROMPT_FILE")
   fi
