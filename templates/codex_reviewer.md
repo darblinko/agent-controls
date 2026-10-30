@@ -37,7 +37,7 @@ Return only JSON that matches the supplied schema:
 
 ```json
 {
-  "status": "APPROVED",
+  "status": "CHANGES_REQUESTED",
   "round": 1,
   "blocking_issues": [
     {
