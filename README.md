@@ -110,7 +110,7 @@ Source: `uvx pytest --collect-only -q`
 | tests/test_claude_profiles.py | 13 checks of config dir and token selection, and refusal of unsafe profile names |
 | tests/test_links.py | Every relative link and image in the Markdown and HTML files resolves |
 
-The namespace tests are skipped where bubblewrap cannot create a namespace. CI installs bubblewrap and enables unprivileged user namespaces so they run there ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+The namespace tests are skipped where the wrapper cannot create its namespace; the probe runs `bin/codex-sandbox` itself, with its real bwrap flags. `pytest -rs` prints each skip reason. `CODEX_SANDBOX_REQUIRE_NAMESPACE=1` turns the skips into failures. CI installs bubblewrap, enables unprivileged user namespaces and runs with `-rs` ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ## Quickstart
 

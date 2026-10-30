@@ -35,4 +35,5 @@ jobs:
           uvx ruff format --check .
 
       - name: pytest
-        run: uvx pytest -v
+        # -rs prints the reason for every skipped test in the summary.
+        run: uvx pytest -v -rs

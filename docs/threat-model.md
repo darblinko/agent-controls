@@ -50,7 +50,7 @@ The wrapper starts Codex in a bubblewrap mount namespace. A path that is not bou
 | Writes to a reference repository | `ro` roots are read-only binds. | test_read_only_root_refuses_writes |
 | WSL: Windows drives, the interop socket | `/mnt` is an empty tmpfs and `/run` is absent, except that the target of `/etc/resolv.conf`, when it resolves outside `/etc`, is bound read-only as one file and can lie under `/mnt` or `/run`. `/init` is absent. `WSL_INTEROP` and `WSLENV` are unset. The tests check that `/run` and `/init` are not bound, that `/init` is absent inside the namespace, and that the two variables are unset. | test_wsl_routes_are_removed, test_home_mnt_and_wsl_entry_points_are_empty_or_absent |
 
-The five tests that start a real namespace are skipped where bubblewrap cannot create one. CI enables unprivileged user namespaces so that they run there.
+The five tests that start a real namespace are skipped where the wrapper cannot create its namespace. The probe runs `bin/codex-sandbox` itself, so it uses the same bwrap flags as the tests. `CODEX_SANDBOX_REQUIRE_NAMESPACE=1` turns the skips into failures. CI enables unprivileged user namespaces so that they run there, and prints skip reasons with `pytest -rs`.
 
 ### What it does not prevent
 

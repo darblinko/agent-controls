@@ -2,12 +2,15 @@
 
 The dry-run tests check the bwrap arguments the wrapper builds. The tests marked
 needs_bwrap run a stand-in Codex inside a real namespace and check what it can
-and cannot reach; they are skipped where bubblewrap cannot create a namespace.
+and cannot reach. They are skipped where the wrapper cannot create its
+namespace, unless CODEX_SANDBOX_REQUIRE_NAMESPACE=1, which makes them run and
+fail there instead.
 """
 
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,14 +23,42 @@ FAKE_CODEX = '#!/usr/bin/env bash\nexec bash -c "$1"\n'
 BIND_FLAGS = {"--bind", "--ro-bind", "--ro-bind-try"}
 
 
-def bwrap_usable() -> bool:
+def namespace_probe_failure() -> str | None:
+    """Run the wrapper itself, with its real namespace flags, on `true`.
+
+    Returns None when the namespace starts, otherwise the reason it did not.
+    """
     if shutil.which("bwrap") is None:
-        return False
-    probe = ["bwrap", "--ro-bind", "/", "/", "--unshare-all", "true"]
-    return subprocess.run(probe, capture_output=True).returncode == 0
+        return "bwrap is not installed"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        tools, home, work = base / "tools", base / "home", base / "work"
+        for path in (tools, home, work):
+            path.mkdir()
+        codex = tools / "codex"
+        codex.write_text(FAKE_CODEX)
+        codex.chmod(0o755)
+        config = base / "sandbox.conf"
+        config.write_text(f"tool {tools}\nrw {work}\n")
+        env = {
+            "PATH": os.environ["PATH"],
+            "HOME": str(home),
+            "CODEX_BIN": str(codex),
+            "CODEX_SANDBOX_CONFIG": str(config),
+        }
+        result = subprocess.run(
+            [str(WRAPPER), "true"], cwd=work, env=env, capture_output=True, text=True
+        )
+    if result.returncode == 0:
+        return None
+    return f"the wrapper's namespace did not start: {result.stderr.strip()[:200]}"
 
 
-needs_bwrap = pytest.mark.skipif(not bwrap_usable(), reason="bubblewrap cannot run here")
+PROBE_FAILURE = namespace_probe_failure()
+needs_bwrap = pytest.mark.skipif(
+    PROBE_FAILURE is not None and os.environ.get("CODEX_SANDBOX_REQUIRE_NAMESPACE") != "1",
+    reason=f"namespace tests skipped: {PROBE_FAILURE}",
+)
 
 
 @dataclass
