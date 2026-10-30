@@ -7,6 +7,7 @@ records the prompt it receives and returns a canned verdict.
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -279,6 +280,49 @@ def test_failing_tests_block_without_using_a_round(project):
     reviewed = project.run(CHANGES, REVIEW_GATE_TEST_CMD="true")
     assert reviewed.returncode == 2
     assert "round 1 of 2" in reviewed.stderr
+
+
+def prompt_sections(prompt: str) -> dict[str, str]:
+    """Map each "## <title>" heading of the prompt to the text below it."""
+    parts = re.split(r"^## (.+)$", prompt, flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2], strict=True))
+
+
+def test_prompt_holds_each_kind_of_change_in_its_own_section(project):
+    project.edit("staged.py", "VALUE = 'index-marker'\n")
+    git(project.root, "add", "staged.py")
+    project.edit(text="def total():\n    return 'worktree-marker'\n")
+    project.edit("untracked.py", "VALUE = 'new-file-marker'\n")
+    project.run(APPROVED)
+    sections = prompt_sections(project.prompt(1))
+    expected = {
+        "Staged Diff": "index-marker",
+        "Unstaged Diff": "worktree-marker",
+        "Untracked Files": "new-file-marker",
+    }
+    for title in expected:
+        for other_title, other_marker in expected.items():
+            assert (other_marker in sections[title]) == (title == other_title), title
+    assert "A  staged.py" in sections["Git Status"]
+    assert " M app.py" in sections["Git Status"]
+    assert "?? untracked.py" in sections["Git Status"]
+
+
+def test_codex_is_invoked_read_only_with_the_schema_and_the_prompt_on_stdin(project):
+    project.edit()
+    project.run(APPROVED)
+    args = project.args(1)
+    root = str(project.root.resolve())
+
+    def value_of(flag: str) -> str:
+        return args[args.index(flag) + 1]
+
+    assert args[:2] == ["exec", "--ephemeral"]
+    assert value_of("--sandbox") == "read-only"
+    assert value_of("--cd") == root
+    assert value_of("--output-schema") == ".ai/codex_review_schema.json"
+    assert value_of("--output-last-message") == ".ai/reports/codex_review.json.new"
+    assert args[-1] == "-"
 
 
 def test_test_output_is_included_in_the_prompt(project):
