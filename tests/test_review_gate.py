@@ -346,6 +346,26 @@ def test_unhashable_untracked_file_stops_the_gate_without_approval(project):
     assert project.calls() == 0
 
 
+@pytest.mark.parametrize("repeat", [1, 4000], ids=["small-target", "large-target"])
+def test_untracked_symlink_is_shown_as_its_link_text(project, tmp_path, repeat):
+    target = tmp_path / "confidential.txt"
+    target.write_text("confidential-marker\n" * repeat)
+    (project.root / "notes.txt").symlink_to(target)
+    assert project.run(APPROVED).returncode == 0
+    prompt = project.prompt(1)
+    assert "confidential-marker" not in prompt
+    assert f"[symbolic link to {target}]" in prompt
+
+
+def test_retargeted_untracked_symlink_triggers_a_new_review(project, tmp_path):
+    (project.root / "link").symlink_to(tmp_path / "first")
+    assert project.run(APPROVED).returncode == 0
+    (project.root / "link").unlink()
+    (project.root / "link").symlink_to(tmp_path / "second")
+    project.run(APPROVED)
+    assert project.calls() == 2
+
+
 def test_binary_untracked_files_are_not_inlined(project):
     project.edit("model.PKL", "binary-marker")
     project.run(APPROVED)

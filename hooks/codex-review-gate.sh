@@ -125,7 +125,11 @@ untracked_paths() {
 untracked_state() {
   local file digest
   while IFS= read -r -d '' file; do
-    digest=$(git hash-object -- "$file") || return 1
+    if [[ -L $file ]]; then
+      digest="symlink:$(readlink -- "$file")" || return 1
+    else
+      digest=$(git hash-object -- "$file") || return 1
+    fi
     printf '%s %s\n' "$file" "$digest"
   done < <(untracked_paths)
 }
@@ -216,6 +220,11 @@ bounded_diff() {
 untracked_files_section() {
   local file size
   while IFS= read -r -d '' file; do
+    # A symlink is shown as its link text; its target is never read.
+    if [[ -L $file ]]; then
+      printf '\n### %s\n[symbolic link to %s]\n' "$file" "$(readlink -- "$file")"
+      continue
+    fi
     [[ -f $file ]] || continue
     printf '\n### %s\n' "$file"
     if [[ ${file,,} =~ $BINARY_EXT_PATTERN ]]; then
