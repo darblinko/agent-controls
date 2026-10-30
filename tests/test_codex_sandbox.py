@@ -325,12 +325,19 @@ def test_default_lookup_skips_the_wrapper_itself(sandbox):
     assert argv[-2:] == [str(sandbox.codex), "exec"]
 
 
+# Each negative test first reads a permitted file, so a sandbox that failed to
+# start cannot pass it.
+READ_PERMITTED = "cat permitted.txt && echo inside-sandbox && "
+
+
 @needs_bwrap
 def test_files_outside_the_root_do_not_exist(sandbox):
     app = sandbox.make_dir("work/app")
+    sandbox.write("work/app/permitted.txt", "permitted-marker\n")
     outside = sandbox.write("outside/notes.txt", "outside-marker\n")
     sandbox.configure(f"rw {app}")
-    result = sandbox.run(app, f"cat {outside}", dry_run=False)
+    result = sandbox.run(app, f"{READ_PERMITTED}cat {outside}", dry_run=False)
+    assert "permitted-marker\ninside-sandbox\n" in result.stdout, result.stderr
     assert result.returncode != 0
     assert "outside-marker" not in result.stdout
     assert "No such file or directory" in result.stderr
@@ -339,18 +346,23 @@ def test_files_outside_the_root_do_not_exist(sandbox):
 @needs_bwrap
 def test_masked_env_file_content_is_not_readable(sandbox):
     app = sandbox.make_dir("work/app")
+    sandbox.write("work/app/permitted.txt", "permitted-marker\n")
     sandbox.write("work/app/.env", "TOKEN=env-marker\n")
     sandbox.configure(f"rw {app}")
-    result = sandbox.run(app, "cat .env", dry_run=False)
-    assert "env-marker" not in result.stdout
+    result = sandbox.run(app, f"{READ_PERMITTED}cat .env", dry_run=False)
+    assert "permitted-marker\ninside-sandbox\n" in result.stdout, result.stderr
+    assert "env-marker" not in result.stdout + result.stderr
 
 
 @needs_bwrap
 def test_read_only_root_refuses_writes(sandbox):
     lib = sandbox.make_dir("work/lib")
+    sandbox.write("work/lib/permitted.txt", "permitted-marker\n")
     sandbox.configure(f"ro {lib}")
-    result = sandbox.run(lib, "touch new.txt", dry_run=False)
+    result = sandbox.run(lib, f"{READ_PERMITTED}touch new.txt", dry_run=False)
+    assert "permitted-marker\ninside-sandbox\n" in result.stdout, result.stderr
     assert result.returncode != 0
+    assert "Read-only file system" in result.stderr
     assert not (lib / "new.txt").exists()
 
 
