@@ -16,7 +16,8 @@
 #   The configured root that contains the current directory is bound
 #   read-write or read-only. A read-only root given with a subtree list binds
 #   only those subtrees, so .git is absent and `exec` gets
-#   --skip-git-repo-check.
+#   --skip-git-repo-check. A subtree whose path resolves through a symbolic
+#   link is refused.
 #   Every regular file under a bound root whose name matches .env* or a `mask`
 #   pattern is overmounted with /dev/null. The search prunes directories
 #   named node_modules, .git, .venv, venv and __pycache__, so files inside
@@ -248,6 +249,11 @@ root_args() {
   partial_root=1
   for subtree in "${subtrees[@]}"; do
     [[ -e $root/$subtree ]] || continue
+    # bwrap follows symlinks in a bind source, so a linked subtree could expose
+    # a directory outside the root.
+    if [[ $(readlink -f "$root/$subtree") != "$root/${subtree%/}" ]]; then
+      die "subtree $subtree of $root resolves through a symbolic link or is not a normalized path"
+    fi
     bound_dirs+=("$root/$subtree")
     bwrap_args+=(--ro-bind "$root/$subtree" "$root/$subtree")
   done

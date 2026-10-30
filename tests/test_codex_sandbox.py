@@ -146,6 +146,19 @@ def test_subtree_root_refuses_a_directory_outside_its_subtrees(sandbox):
     assert "outside its bound subtrees" in result.stderr
 
 
+@pytest.mark.parametrize("subtree", ["docs", "docs/inner"])
+def test_subtree_that_resolves_through_a_symlink_is_refused(sandbox, subtree):
+    gov = sandbox.make_dir("work/gov")
+    other = sandbox.make_dir("work/other-repo")
+    sandbox.make_dir("work/other-repo/inner")
+    (gov / "docs").symlink_to(other)
+    sandbox.configure(f"ro {gov} {subtree}")
+    result = sandbox.run(gov)
+    assert result.returncode == 1
+    assert "resolves through a symbolic link" in result.stderr
+    assert str(other) not in result.stdout
+
+
 def test_subtrees_are_rejected_on_read_write_roots(sandbox):
     app = sandbox.make_dir("work/app")
     sandbox.configure(f"rw {app} src")
