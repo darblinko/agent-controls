@@ -116,9 +116,12 @@ The namespace tests are skipped where the wrapper cannot create its namespace; t
 
 Requirements: bash 4.4 or later, git, Python 3.10 or later, [uv](https://docs.astral.sh/uv/), `flock` from util-linux for the review gate, and bubblewrap (`apt install bubblewrap`) for the sandbox.
 
+The steps below keep the checkout path in `AGENT_CONTROLS`, so they work after a `cd` into a project.
+
 ```bash
-git clone https://github.com/darblinko/agent-controls
-cd agent-controls
+AGENT_CONTROLS=~/agent-controls
+git clone https://github.com/darblinko/agent-controls "$AGENT_CONTROLS"
+cd "$AGENT_CONTROLS"
 uvx pytest -q
 uvx --from shellcheck-py shellcheck bin/codex-sandbox hooks/codex-review-gate.sh shell/claude-profiles.sh
 ```
@@ -127,10 +130,10 @@ uvx --from shellcheck-py shellcheck bin/codex-sandbox hooks/codex-review-gate.sh
 
 ```bash
 mkdir -p ~/.local/bin ~/.config/agent-controls
-cp examples/sandbox.conf ~/.config/agent-controls/sandbox.conf   # edit the roots and tool paths
-ln -s "$PWD/bin/codex-sandbox" ~/.local/bin/codex                  # must come before the real codex on PATH
-cd ~/src/my-app                                                    # a configured root
-CODEX_SANDBOX_DRY_RUN=1 codex exec "list the files"                # print the bwrap command
+cp "$AGENT_CONTROLS/examples/sandbox.conf" ~/.config/agent-controls/     # edit the roots and tool paths
+ln -s "$AGENT_CONTROLS/bin/codex-sandbox" ~/.local/bin/codex             # must come before the real codex on PATH
+cd ~/src/my-app                                                          # a configured root
+CODEX_SANDBOX_DRY_RUN=1 codex exec "list the files"                      # print the bwrap command
 codex exec "list the files"
 ```
 
@@ -141,8 +144,8 @@ The wrapper finds the real Codex as the next `codex` on `PATH`; set `CODEX_BIN` 
 ```bash
 cd ~/src/my-app
 mkdir -p hooks .ai
-cp /path/to/agent-controls/hooks/codex-review-gate.sh /path/to/agent-controls/hooks/review_gate.py hooks/
-cp /path/to/agent-controls/templates/codex_reviewer.md /path/to/agent-controls/templates/codex_review_schema.json .ai/
+cp "$AGENT_CONTROLS/hooks/codex-review-gate.sh" "$AGENT_CONTROLS/hooks/review_gate.py" hooks/
+cp "$AGENT_CONTROLS/templates/codex_reviewer.md" "$AGENT_CONTROLS/templates/codex_review_schema.json" .ai/
 echo '.ai/reports/' >> .gitignore
 ```
 
@@ -151,7 +154,7 @@ Merge [examples/claude-settings.json](examples/claude-settings.json) into `.clau
 ### Use profiles
 
 ```bash
-echo ". $PWD/shell/claude-profiles.sh" >> ~/.bashrc
+echo ". $AGENT_CONTROLS/shell/claude-profiles.sh" >> ~/.bashrc
 alias work='cd ~/src/work && GH_CONFIG_DIR=$HOME/.config/gh-work claude_profile work'
 ```
 
